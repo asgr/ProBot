@@ -1,75 +1,50 @@
 \name{probotSave}
 \alias{probotSave}
-%- Also NEED an '\alias' for EACH other topic documented here.
-\title{
-A Capitalized Title (ideally limited to 65 characters)
-}
+\alias{probotLoad}
+\title{Save and Reload Mixture Density Network State}
 \description{
-%%  ~~ A concise (1-5 lines) description of what the function does. ~~
+Save model (and optional optimizer) state to disk and reload model weights.
 }
 \usage{
 probotSave(model, optimizer = NULL, filename = "temp.pt", ...)
+
 probotLoad(filename, model_skeleton)
 }
-%- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{model}{
-%%     ~~Describe \code{x} here~~
-}
-  \item{optimizer}{
-%%     ~~Describe \code{x} here~~
-}
-  \item{filename}{
-%%     ~~Describe \code{x} here~~
-}
- \item{model_skeleton}{
-%%     ~~Describe \code{x} here~~
-}
-  \item{\dots}{
-%%     ~~Describe \code{x} here~~
-}
+  \item{model}{A torch module instance to save.}
+
+  \item{optimizer}{Optional torch optimizer whose state should also be saved.}
+
+  \item{filename}{Path to a \code{.pt} file used for save/load.}
+
+  \item{model_skeleton}{A model object with matching architecture to load into.}
+
+  \item{\dots}{Additional named objects to store in the checkpoint file.}
 }
 \details{
-%%  ~~ If necessary, more details than the description above ~~
+\code{probotSave()} writes a list containing at least \code{model} and
+\code{optimizer} states. \code{probotLoad()} loads a saved object and applies it
+via \code{$load_state_dict()} to \code{model_skeleton}.
 }
 \value{
-%%  ~Describe the value returned
-%%  If it is a LIST, use
-%%  \item{comp1 }{Description of 'comp1'}
-%%  \item{comp2 }{Description of 'comp2'}
-%% ...
+\itemize{
+  \item \code{probotSave()}: Called for side effect; returns invisibly.
+  \item \code{probotLoad()}: The updated \code{model_skeleton} with loaded weights.
 }
-\references{
-%% ~put references to the literature/web site here ~
 }
-\author{
-%%  ~~who you are~~
-}
-\note{
-%%  ~~further notes~~
-}
-
-%% ~Make other sections like Warning with \section{Warning }{....} ~
-
 \seealso{
-%% ~~objects to See Also as \code{\link{help}}, ~~~
+\code{\link{probotMakeMDN}}, \code{\link{probotTrainMDN}}
 }
 \examples{
-##---- Should be DIRECTLY executable !! ----
-##-- ==>  Define data, use random,
-##--	or standard data sets, see data().
+if (requireNamespace("torch", quietly = TRUE)) {
+  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
 
-## The function is currently defined as
-function (x)
-{
-  }
+  path <- tempfile(fileext = ".pt")
+  probotSave(model, filename = path)
+
+  restored <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
+  restored <- probotLoad(path, restored)
+
+  file.exists(path)
 }
-% Add one or more standard keywords, see file 'KEYWORDS' in the
-% R documentation directory (show via RShowDoc("KEYWORDS")):
-% \keyword{ ~kwd1 }
-% \keyword{ ~kwd2 }
-% Use only one keyword per line.
-% For non-standard keywords, use \concept instead of \keyword:
-% \concept{ ~cpt1 }
-% \concept{ ~cpt2 }
-% Use only one concept per line.
+}

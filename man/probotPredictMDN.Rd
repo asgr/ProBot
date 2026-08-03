@@ -1,73 +1,40 @@
 \name{probotPredictMDN}
 \alias{probotPredictMDN}
-%- Also NEED an '\alias' for EACH other topic documented here.
-\title{
-A Capitalized Title (ideally limited to 65 characters)
-}
+\title{Run an MDN Model and Unpack Mixture Parameters}
 \description{
-%%  ~~ A concise (1-5 lines) description of what the function does. ~~
+Run a trained Mixture Density Network on new input data and return unpacked
+mixture parameters.
 }
 \usage{
 probotPredictMDN(input, model, n_components)
 }
-%- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{input}{
-%%     ~~Describe \code{input} here~~
-}
-  \item{model}{
-%%     ~~Describe \code{model} here~~
-}
-  \item{n_components}{
-%%     ~~Describe \code{n_components} here~~
-}
+  \item{input}{Numeric matrix of predictors with rows as observations.}
+
+  \item{model}{Instantiated torch module returned by \code{probotMakeMDN(... )()}.}
+
+  \item{n_components}{Number of Gaussian mixture components in \code{model}.}
 }
 \details{
-%%  ~~ If necessary, more details than the description above ~~
+Prediction runs in evaluation mode and without gradient tracking.
 }
 \value{
-%%  ~Describe the value returned
-%%  If it is a LIST, use
-%%  \item{comp1 }{Description of 'comp1'}
-%%  \item{comp2 }{Description of 'comp2'}
-%% ...
+A list with elements:
+\itemize{
+  \item \code{mu}: tensor of component means.
+  \item \code{log10_sigma}: tensor of component \code{log10} standard deviations.
+  \item \code{logits}: tensor of unnormalized mixture logits.
 }
-\references{
-%% ~put references to the literature/web site here ~
 }
-\author{
-%%  ~~who you are~~
-}
-\note{
-%%  ~~further notes~~
-}
-
-%% ~Make other sections like Warning with \section{Warning }{....} ~
-
 \seealso{
-%% ~~objects to See Also as \code{\link{help}}, ~~~
+\code{\link{probotMakeMDN}}, \code{\link{probotSamplePostMDN}}
 }
 \examples{
-##---- Should be DIRECTLY executable !! ----
-##-- ==>  Define data, use random,
-##--	or standard data sets, see data().
+if (requireNamespace("torch", quietly = TRUE)) {
+  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 3)()
+  x <- matrix(rnorm(12), ncol = 2)
 
-## The function is currently defined as
-function (input, model, n_components) 
-{
-    model$eval()
-    with_no_grad({
-        output <- model(torch_tensor(input, dtype = torch_float()))
-    })
-    .probotUnpackMDN(output, n_components)
-  }
+  pred <- probotPredictMDN(x, model, n_components = 3)
+  pred$mu$size()
 }
-% Add one or more standard keywords, see file 'KEYWORDS' in the
-% R documentation directory (show via RShowDoc("KEYWORDS")):
-% \keyword{ ~kwd1 }
-% \keyword{ ~kwd2 }
-% Use only one keyword per line.
-% For non-standard keywords, use \concept instead of \keyword:
-% \concept{ ~cpt1 }
-% \concept{ ~cpt2 }
-% Use only one concept per line.
+}

@@ -1,82 +1,43 @@
 \name{probotLossMDN}
 \alias{probotLossMDN}
-%- Also NEED an '\alias' for EACH other topic documented here.
-\title{
-A Capitalized Title (ideally limited to 65 characters)
-}
+\title{Compute Negative Log-Likelihood for an MDN Output}
 \description{
-%%  ~~ A concise (1-5 lines) description of what the function does. ~~
+Compute the Mixture Density Network loss as mean negative log-likelihood of
+targets under a Gaussian mixture.
 }
 \usage{
 probotLossMDN(output_true, output_pred, n_components)
 }
-%- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{output_true}{
-%%     ~~Describe \code{output_true} here~~
-}
-  \item{output_pred}{
-%%     ~~Describe \code{output_pred} here~~
-}
-  \item{n_components}{
-%%     ~~Describe \code{n_components} here~~
-}
+  \item{output_true}{Torch tensor of true targets with shape
+  \code{batch x output_dim}.}
+
+  \item{output_pred}{Torch tensor of raw MDN outputs from the network.}
+
+  \item{n_components}{Number of Gaussian mixture components used by the model.}
 }
 \details{
-%%  ~~ If necessary, more details than the description above ~~
+The function unpacks predicted means, log-scales, and mixture logits; applies
+numerically stable log-sum-exp aggregation over components; and returns the
+average negative log-likelihood.
 }
 \value{
-%%  ~Describe the value returned
-%%  If it is a LIST, use
-%%  \item{comp1 }{Description of 'comp1'}
-%%  \item{comp2 }{Description of 'comp2'}
-%% ...
+A scalar torch tensor containing the loss value.
 }
-\references{
-%% ~put references to the literature/web site here ~
-}
-\author{
-%%  ~~who you are~~
-}
-\note{
-%%  ~~further notes~~
-}
-
-%% ~Make other sections like Warning with \section{Warning }{....} ~
-
 \seealso{
-%% ~~objects to See Also as \code{\link{help}}, ~~~
+\code{\link{probotMakeMDN}}, \code{\link{probotSingleEpochMDN}}
 }
 \examples{
-##---- Should be DIRECTLY executable !! ----
-##-- ==>  Define data, use random,
-##--	or standard data sets, see data().
+if (requireNamespace("torch", quietly = TRUE)) {
+  torch::torch_manual_seed(1)
 
-## The function is currently defined as
-function (output_true, output_pred, n_components) 
-{
-    output_dim <- output_true$size(2)
-    p <- .probotUnpackMDN(output_pred, n_components)
-    mu <- p$mu
-    log10_sigma <- torch_clamp(p$log10_sigma, min = -5, max = 5)
-    sigma <- 10^log10_sigma
-    y_true <- output_true$unsqueeze(2)
-    y_true <- y_true$expand(c(y_true$size(1), n_components, output_dim))
-    z <- (y_true - mu)/sigma
-    log_prob <- -0.5 * (z^2 + 2 * log10_sigma * log(10) + log(2 * 
-        pi))
-    log_prob <- log_prob$sum(dim = 3)
-    log_pi <- nnf_log_softmax(p$logits, dim = 2)
-    log_mix_prob <- torch_logsumexp(log_pi + log_prob, dim = 2)
-    -log_mix_prob$mean()
-  }
+  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
+  x <- torch::torch_randn(c(4, 2))
+  y <- torch::torch_randn(c(4, 1))
+
+  pred <- model(x)
+  loss <- probotLossMDN(y, pred, n_components = 2)
+
+  as.numeric(loss$item())
 }
-% Add one or more standard keywords, see file 'KEYWORDS' in the
-% R documentation directory (show via RShowDoc("KEYWORDS")):
-% \keyword{ ~kwd1 }
-% \keyword{ ~kwd2 }
-% Use only one keyword per line.
-% For non-standard keywords, use \concept instead of \keyword:
-% \concept{ ~cpt1 }
-% \concept{ ~cpt2 }
-% Use only one concept per line.
+}
