@@ -32,6 +32,9 @@ via \code{$load_state_dict()} to \code{model_skeleton}.
   \item \code{probotLoad()}: The updated \code{model_skeleton} with loaded weights.
 }
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotMakeMDN}}, \code{\link{probotTrainMDN}}
 }

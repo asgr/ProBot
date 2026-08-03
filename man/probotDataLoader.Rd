@@ -26,6 +26,9 @@ If \code{train_idx} is \code{NULL}, all rows are used.
 A \code{torch::dataloader} object yielding batches with \code{$x} and \code{$y}
 tensors.
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotSingleEpochMDN}}, \code{\link{probotTrainMDN}}
 }

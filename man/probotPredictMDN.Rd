@@ -26,6 +26,9 @@ A list with elements:
   \item \code{logits}: tensor of unnormalized mixture logits.
 }
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotMakeMDN}}, \code{\link{probotSamplePostMDN}}
 }

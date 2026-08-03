@@ -24,6 +24,9 @@ average negative log-likelihood.
 \value{
 A scalar torch tensor containing the loss value.
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotMakeMDN}}, \code{\link{probotSingleEpochMDN}}
 }

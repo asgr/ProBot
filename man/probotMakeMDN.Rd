@@ -33,6 +33,9 @@ deviations, and one mixture logit.
 \value{
 A torch module generator; instantiate with \code{probotMakeMDN(... )()}.
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotPredictMDN}}, \code{\link{probotLossMDN}}
 }

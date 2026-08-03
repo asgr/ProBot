@@ -44,6 +44,9 @@ and standard deviations and back-transforms both.
   \code{post_sd} matrices.
 }
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotPredictMDN}}, \code{\link{probotScaleBackward}}
 }

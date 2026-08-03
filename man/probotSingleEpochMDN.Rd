@@ -65,6 +65,9 @@ weights. Early stopping compares mean loss over the latest
   \code{history} data frame.
 }
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotDataLoader}}, \code{\link{probotLossMDN}},
 \code{\link{probotSave}}

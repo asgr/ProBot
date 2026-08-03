@@ -30,6 +30,9 @@ arguments when provided; otherwise it reads the values from this attribute.
 A numeric matrix with transformed values. Forward output includes a
 \code{col_scale} attribute.
 }
+\author{
+Aaron Robotham
+}
 \seealso{
 \code{\link{probotSamplePostMDN}}, \code{\link{probotMarginalPostMDN}}
 }
