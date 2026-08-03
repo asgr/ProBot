@@ -23,8 +23,8 @@ probotLoad(filename, model_skeleton)
 }
 \details{
 \code{probotSave()} writes a list containing at least \code{model} and
-\code{optimizer} states. \code{probotLoad()} loads a saved object and applies it
-via \code{$load_state_dict()} to \code{model_skeleton}.
+\code{optimizer} states. \code{probotLoad()} loads a saved file and applies the
+\code{model} state dict to \code{model_skeleton} via \code{$load_state_dict()}.
 }
 \value{
 \itemize{

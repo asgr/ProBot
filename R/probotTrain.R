@@ -4,7 +4,7 @@ probotDataLoader <- function(input,
                              shuffle = TRUE,
                              train_idx = NULL) {
   if (is.null(train_idx)) {
-    train_idx = 1:dim(input)[1]
+    train_idx = 1:nrow(input)
   }
 
   input_train <- torch_tensor(input[train_idx, ], dtype = torch_float())
@@ -188,7 +188,8 @@ probotTrainMDN <- function(model,
       loss = x$loss,
       mae = x$mae,
       rmse = x$rmse,
-      sigma = x$sigma
+      sigma = x$sigma,
+      mix_sd = sd(x$mix)
     )
 
   }))

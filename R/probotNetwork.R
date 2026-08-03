@@ -1,7 +1,9 @@
-probotMakeMDN <- function(input_dim, output_dim, mdn_components, hidden_dims = c(128, 256, 256), activation = nnf_relu) {
+probotMakeMDN <- function(input_dim, output_dim, mdn_components, hidden_dims = c(128, 256, 256), activation = nnf_relu, dropout = 0) {
   nn_module(
     "mlp",
     initialize = function() {
+      self$activation_fn <- activation
+      self$dropout_rate  <- dropout
       dims <- c(input_dim, hidden_dims, mdn_components * (2 * output_dim + 1))
       self$layers <- nn_module_list()
       for (i in seq_len(length(dims) - 1)) {
@@ -12,10 +14,13 @@ probotMakeMDN <- function(input_dim, output_dim, mdn_components, hidden_dims = c
     forward = function(x) {
       n_layers <- length(self$layers)
       for (i in seq_len(n_layers - 1)) {
-        x <- self$layers[[i]](x)  # Fixed subsetting and activation call
-        x <- activation(x)
+        x <- self$layers[[i]](x)
+        x <- self$activation_fn(x)
+        if (self$dropout_rate > 0) {
+          x <- nnf_dropout(x, p = self$dropout_rate, training = self$training)
+        }
       }
-      x <- self$layers[[n_layers]](x) # Fixed final layer execution
+      x <- self$layers[[n_layers]](x)
       x
     }
   )
