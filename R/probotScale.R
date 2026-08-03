@@ -1,6 +1,6 @@
 probotScaleForward = function(input){
-  col_means = matrixStats::colMeans2(input, na.rm = TRUE)
-  col_sds = matrixStats::colSds(input, na.rm = TRUE)
+  col_means = collapse::fmean(input, na.rm = TRUE)
+  col_sds = collapse::fsd(input, na.rm = TRUE)
 
   output = collapse::TRA(input, col_means, "-")
   output = collapse::TRA(output, col_sds, "/")

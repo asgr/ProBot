@@ -25,7 +25,7 @@ probotSave <- function(
 
 probotLoad = function(filename, model_skeleton){
   model_skeleton$load_state_dict(
-    torch_load(filename)
+    torch_load(filename)$model
   )
   return(model_skeleton)
 }

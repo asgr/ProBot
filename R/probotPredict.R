@@ -152,5 +152,5 @@ probotMarginalPostMDN = function(mdn_output,
   colnames(post_sd) = col_names
   colnames(post_mean) = col_names
 
-  return=list(post_mean=post_mean, post_sd=post_sd)
+  return(list(post_mean=post_mean, post_sd=post_sd))
 }

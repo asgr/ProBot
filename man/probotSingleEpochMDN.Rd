@@ -62,7 +62,9 @@ weights. Early stopping compares mean loss over the latest
   \item \code{probotSingleEpochMDN()}: List with \code{loss}, \code{mae},
   \code{rmse}, \code{sigma}, and \code{mix}.
   \item \code{probotTrainMDN()}: List with trained \code{model} and
-  \code{history} data frame.
+  \code{history} data frame. The history data frame contains columns
+  \code{epoch}, \code{loss}, \code{mae}, \code{rmse}, \code{sigma}, and
+  \code{mix_sd} (standard deviation of mixture weights across components).
 }
 }
 \author{
