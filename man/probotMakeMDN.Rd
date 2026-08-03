@@ -1,91 +1,49 @@
 \name{probotMakeMDN}
 \alias{probotMakeMDN}
-%- Also NEED an '\alias' for EACH other topic documented here.
-\title{
-A Capitalized Title (ideally limited to 65 characters)
-}
+\title{Construct a Fully Connected Mixture Density Network}
 \description{
-%%  ~~ A concise (1-5 lines) description of what the function does. ~~
+Create a torch \code{nn_module} generator for a multilayer perceptron whose
+output parameterizes a Gaussian mixture.
 }
 \usage{
-probotMakeMDN(input_dim, output_dim, mdn_components, hidden_dims = c(128, 256, 256), activation = nnf_relu)
+probotMakeMDN(
+  input_dim,
+  output_dim,
+  mdn_components,
+  hidden_dims = c(128, 256, 256),
+  activation = nnf_relu
+)
 }
-%- maybe also 'usage' for other objects documented here.
 \arguments{
-  \item{input_dim}{
-%%     ~~Describe \code{input_dim} here~~
-}
-  \item{output_dim}{
-%%     ~~Describe \code{output_dim} here~~
-}
-  \item{mdn_components}{
-%%     ~~Describe \code{mdn_components} here~~
-}
-  \item{hidden_dims}{
-%%     ~~Describe \code{hidden_dims} here~~
-}
-  \item{activation}{
-%%     ~~Describe \code{activation} here~~
-}
+  \item{input_dim}{Number of predictor features.}
+
+  \item{output_dim}{Number of target dimensions.}
+
+  \item{mdn_components}{Number of Gaussian mixture components.}
+
+  \item{hidden_dims}{Integer vector of hidden layer widths.}
+
+  \item{activation}{Activation function applied between hidden layers.}
 }
 \details{
-%%  ~~ If necessary, more details than the description above ~~
+The final layer size is \code{mdn_components * (2 * output_dim + 1)} to encode,
+per component, \code{output_dim} means, \code{output_dim} log10 standard
+deviations, and one mixture logit.
 }
 \value{
-%%  ~Describe the value returned
-%%  If it is a LIST, use
-%%  \item{comp1 }{Description of 'comp1'}
-%%  \item{comp2 }{Description of 'comp2'}
-%% ...
+A torch module generator; instantiate with \code{probotMakeMDN(... )()}.
 }
-\references{
-%% ~put references to the literature/web site here ~
-}
-\author{
-%%  ~~who you are~~
-}
-\note{
-%%  ~~further notes~~
-}
-
-%% ~Make other sections like Warning with \section{Warning }{....} ~
-
 \seealso{
-%% ~~objects to See Also as \code{\link{help}}, ~~~
+\code{\link{probotPredictMDN}}, \code{\link{probotLossMDN}}
 }
 \examples{
-##---- Should be DIRECTLY executable !! ----
-##-- ==>  Define data, use random,
-##--	or standard data sets, see data().
+if (requireNamespace("torch", quietly = TRUE)) {
+  net <- probotMakeMDN(input_dim = 3, output_dim = 2, mdn_components = 2)
+  model <- net()
 
-## The function is currently defined as
-function (input_dim, output_dim, mdn_components, hidden_dims = c(128, 
-    256, 256), activation = nnf_relu) 
-{
-    nn_module("mlp", initialize = function() {
-        dims <- c(input_dim, hidden_dims, mdn_components * (2 * 
-            output_dim + 1))
-        self$layers <- nn_module_list()
-        for (i in seq_len(length(dims) - 1)) {
-            self$layers$append(nn_linear(dims[i], dims[i + 1]))
-        }
-    }, forward = function(x) {
-        n_layers <- length(self$layers)
-        for (i in seq_len(n_layers - 1)) {
-            x <- self$layers[[i]](x)
-            x <- activation(x)
-        }
-        x <- self$layers[[n_layers]](x)
-        x
-    })
-  }
+  x <- torch::torch_randn(c(5, 3))
+  out <- model(x)
+
+  as.integer(out$size(2))
 }
-% Add one or more standard keywords, see file 'KEYWORDS' in the
-% R documentation directory (show via RShowDoc("KEYWORDS")):
-% \keyword{ ~kwd1 }
-% \keyword{ ~kwd2 }
-% Use only one keyword per line.
-% For non-standard keywords, use \concept instead of \keyword:
-% \concept{ ~cpt1 }
-% \concept{ ~cpt2 }
-% Use only one concept per line.
+}
