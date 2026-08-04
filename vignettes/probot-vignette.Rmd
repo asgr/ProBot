@@ -36,7 +36,8 @@ make_polynomial_output <- function(theta) {
     numeric(nrow(theta))
   )
 
-  list(output = t(y), x_grid = x_grid)
+  colnames(y) <- paste0("x", seq_along(x_grid))
+  list(output = y, x_grid = x_grid)
 }
 
 n_train <- 1500
@@ -104,9 +105,6 @@ head(forward_fit$history)
 We can now predict polynomial outputs for new inputs and convert posterior summaries back to the original scale.
 
 ```{r forward-predict}
-theta_test_scaled <- probotScaleForward(theta_test)
-attr(theta_test_scaled, "col_scale") <- attr(input_scaled, "col_scale")
-theta_test_scaled <- probotScaleForward(theta_test)
 theta_test_scaled <- collapse::TRA(theta_test, attr(input_scaled, "col_scale")$col_means, "-")
 theta_test_scaled <- collapse::TRA(theta_test_scaled, attr(input_scaled, "col_scale")$col_sds, "/")
 
@@ -211,10 +209,11 @@ apply(post_samples, 2, sd)
 Finally, we can compare the posterior mean with the true generating inputs for the held-out observations.
 
 ```{r inverse-metrics}
-comparison <- cbind(
-  truth = theta_test[1, ],
-  estimate = inverse_summary$post_mean[1, ],
-  sd = inverse_summary$post_sd[1, ]
+comparison <- data.frame(
+  parameter = colnames(theta_test),
+  truth = as.numeric(theta_test[1, ]),
+  estimate = as.numeric(inverse_summary$post_mean[1, ]),
+  sd = as.numeric(inverse_summary$post_sd[1, ])
 )
 comparison
 ```
