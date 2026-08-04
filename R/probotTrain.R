@@ -21,7 +21,7 @@ probotDataLoader <- function(input,
 probotSingleEpochMDN <- function(model,
                                  dataloader,
                                  optimizer,
-                                 n_components,
+                                 mdn_components,
                                  lambda = 0.01) {
   model$train()
 
@@ -30,7 +30,7 @@ probotSingleEpochMDN <- function(model,
   running_rmse <- 0
   running_sigma <- 0
 
-  running_mix <- numeric(n_components)
+  running_mix <- numeric(mdn_components)
 
   n_batches <- 0
 
@@ -39,7 +39,7 @@ probotSingleEpochMDN <- function(model,
 
     output_pred <- model(batch$x)
 
-    p <- .probotUnpackMDN(output_pred, n_components)
+    p <- .probotUnpackMDN(output_pred, mdn_components)
 
     weights <- nnf_softmax(p$logits, dim = 2)
 
@@ -55,7 +55,7 @@ probotSingleEpochMDN <- function(model,
 
     mix_use <- apply(as.array(weights), 2, mean)
 
-    loss <- probotLossMDN(batch$y, output_pred, n_components) + lambda * mse_loss
+    loss <- probotLossMDN(batch$y, output_pred, mdn_components) + lambda * mse_loss
 
     loss$backward()
 
@@ -84,7 +84,7 @@ probotTrainMDN <- function(model,
                            dataloader,
                            optimizer,
                            epochs = 100,
-                           n_components,
+                           mdn_components,
                            lambda = 0.01,
                            checkpoint_dir = NULL,
                            checkpoint_every = 10,
@@ -102,7 +102,7 @@ probotTrainMDN <- function(model,
       model = model,
       dataloader = dataloader,
       optimizer = optimizer,
-      n_components = n_components,
+      mdn_components = mdn_components,
       lambda = lambda
     )
 

@@ -7,23 +7,12 @@ Run one optimization epoch for an MDN or iterate multiple epochs with optional
 early stopping and checkpoint saving.
 }
 \usage{
-probotSingleEpochMDN(model, dataloader, optimizer, n_components, lambda = 0.01)
+probotSingleEpochMDN(model, dataloader, optimizer, mdn_components,
+  lambda = 0.01)
 
-probotTrainMDN(
-  model,
-  dataloader,
-  optimizer,
-  epochs = 100,
-  n_components,
-  lambda = 0.01,
-  checkpoint_dir = NULL,
-  checkpoint_every = 10,
-  history = NULL,
-  verbose = TRUE,
-  early_stop = TRUE,
-  stop_window = 20,
-  stop_delta = 1e-2
-)
+probotTrainMDN(model, dataloader, optimizer, epochs = 100, mdn_components,
+  lambda = 0.01, checkpoint_dir = NULL, checkpoint_every = 10, history = NULL,
+  verbose = TRUE, early_stop = TRUE, stop_window = 20, stop_delta = 1e-2)
 }
 \arguments{
   \item{model}{Instantiated torch module returned by \code{probotMakeMDN(... )()}.}
@@ -32,7 +21,7 @@ probotTrainMDN(
 
   \item{optimizer}{Torch optimizer configured with model parameters.}
 
-  \item{n_components}{Number of Gaussian mixture components in the model.}
+  \item{mdn_components}{Number of Gaussian mixture components in the model.}
 
   \item{lambda}{Weight for auxiliary MSE regularization term.}
 

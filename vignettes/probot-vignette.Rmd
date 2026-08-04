@@ -17,13 +17,13 @@ torch_manual_seed(1)
 
 ## Overview
 
-ProBot provides a compact interface for training mixture density networks (MDNs) with `torch`. This vignette demonstrates the main workflow on a toy problem where a generative function maps input parameters to the coefficients of a polynomial response, and then shows the inverse problem where we recover plausible inputs from an observed output.
+**ProBot** provides a compact interface for training mixture density networks (MDNs) with `torch`. This vignette demonstrates the main workflow on a toy problem where a generative function maps input parameters to the coefficients of a polynomial response, and then shows the inverse problem where we recover plausible inputs from an observed output.
 
 ## Example 1: infer the polynomial output from inputs
 
 We define a generative function that turns two input parameters into three polynomial coefficients. Those coefficients are then evaluated on a fixed grid.
 
-```{r data}
+```{r}
 make_polynomial_output <- function(theta) {
   a0 <- 0.3 + 0.8 * theta[, 1] - 0.4 * theta[, 2]
   a1 <- -1.2 + 0.5 * theta[, 1]^2 + 0.7 * theta[, 2]
@@ -40,8 +40,8 @@ make_polynomial_output <- function(theta) {
   list(output = y, x_grid = x_grid)
 }
 
-n_train <- 1500
-n_test <- 200
+n_train <- 1e5
+n_test <- 1e4
 
 theta_train <- cbind(
   u = runif(n_train, -1, 1),
@@ -66,7 +66,7 @@ output_scaled <- probotScaleForward(poly_train$output)
 dataloader <- probotDataLoader(
   input = input_scaled,
   output = output_scaled,
-  batch = 256
+  batch = 1024
 )
 ```
 
@@ -76,8 +76,8 @@ Next we build an MDN that predicts the polynomial values directly from the input
 forward_model <- probotMakeMDN(
   input_dim = ncol(input_scaled),
   output_dim = ncol(output_scaled),
-  mdn_components = 3,
-  hidden_dims = c(64, 64)
+  mdn_components = 5,
+  hidden_dims = c(64, 128, 64)
 )()
 
 forward_optimizer <- optim_adam(forward_model$parameters, lr = 0.01)
@@ -86,11 +86,11 @@ forward_fit <- probotTrainMDN(
   model = forward_model,
   dataloader = dataloader,
   optimizer = forward_optimizer,
-  epochs = 20,
-  n_components = 3,
+  epochs = 100,
+  mdn_components = 5,
   lambda = 0.05,
-  verbose = FALSE,
-  early_stop = TRUE,
+  verbose = TRUE,
+  early_stop = FALSE,
   stop_window = 5,
   stop_delta = 1e-3
 )
@@ -100,33 +100,33 @@ The training history records the main optimisation diagnostics.
 
 ```{r forward-history}
 head(forward_fit$history)
+tail(forward_fit$history)
 ```
 
 We can now predict polynomial outputs for new inputs and convert posterior summaries back to the original scale.
 
 ```{r forward-predict}
 theta_test_scaled <- theta_test
-attr(theta_test_scaled, "col_scale") <- attr(input_scaled, "col_scale")
-theta_test_scaled <- probotScaleBackward(
+theta_test_scaled <- probotScaleForward(
   theta_test_scaled,
-  col_means = -attr(input_scaled, "col_scale")$col_means / attr(input_scaled, "col_scale")$col_sds,
-  col_sds = 1 / attr(input_scaled, "col_scale")$col_sds
+  col_means = attr(input_scaled, "col_scale")$col_means,
+  col_sds = attr(input_scaled, "col_scale")$col_sds
 )
 
 forward_pred <- probotPredictMDN(
   input = theta_test_scaled,
   model = forward_fit$model,
-  n_components = 3
+  mdn_components = 5
 )
 
 forward_summary <- probotMarginalPostMDN(
   mdn_output = forward_pred,
   col_means = attr(output_scaled, "col_scale")$col_means,
   col_sds = attr(output_scaled, "col_scale")$col_sds,
-  col_names = paste0("x", seq_len(ncol(output_scaled)))
+  col_names = colnames(output_scaled)
 )
 
-round(forward_summary$post_mean[1:3, 1:4], 3)
+round(forward_summary$post_mean[1:3,], 3)
 ```
 
 A quick mean absolute error on the test set shows that the model can recover the polynomial output well.
@@ -135,25 +135,62 @@ A quick mean absolute error on the test set shows that the model can recover the
 mean(abs(forward_summary$post_mean - poly_test$output))
 ```
 
+```{r forward-samples}
+post_samples <- probotSamplePostMDN(
+  mdn_output = forward_pred,
+  index = 1,
+  n_samples = 2000,
+  col_means = attr(output_scaled, "col_scale")$col_means,
+  col_sds = attr(output_scaled, "col_scale")$col_sds,
+  col_names = colnames(output_scaled)
+)
+
+head(post_samples)
+```
+
+```{r fig.width=6, fig.height=6}
+magtri(post_samples, refvals = poly_test$output[1,])
+```
+
+```{r}
+for(i in 1:9){
+  magplot(poly_test$output[,i], forward_summary$post_mean[,i],
+          xlab=paste0('Truth output: ',i), ylab=paste0('Pred output: ',i), pch='.')
+  magerr(poly_test$output[,i], forward_summary$post_mean[,i],
+         ylo = forward_summary$post_sd[,i], col=hsv(v=0, alpha=0.05))
+  
+}
+```
+
+```{r}
+PIT_out = probotPIT(forward_pred,
+            params = poly_test$output,
+            col_means = attr(output_scaled, "col_scale")$col_means,
+            col_sds = attr(output_scaled, "col_scale")$col_sds,
+            col_names = colnames(output_scaled)
+)
+```
+
+```{r fig.width=6, fig.height=6}
+magtri(PIT_out)
+```
+
 ## Example 2: invert the mapping with MDN uncertainty
 
-For the inverse problem, the polynomial values are the inputs and the latent parameters are the targets. This is where the MDN is especially useful because multiple parameter settings can explain similar outputs.
+For the inverse problem, the polynomial values are the inputs and the latent parameters are the targets. This is where the MDN is especially useful because multiple parameter settings can explain similar outputs. Perhaps the most interesting aspect is the ability for MDN to properly infer posterior errors, allowing extremely efficient Bayesian style inference once properly trained.
 
 ```{r inverse-prep}
-obs_scaled <- probotScaleForward(poly_train$output)
-param_scaled <- probotScaleForward(theta_train)
-
 inverse_loader <- probotDataLoader(
-  input = obs_scaled,
-  output = param_scaled,
-  batch = 256
+  input = output_scaled, #we reuse these, but swap the order
+  output = input_scaled, #we reuse these, but swap the order
+  batch = 1024
 )
 
 inverse_model <- probotMakeMDN(
-  input_dim = ncol(obs_scaled),
-  output_dim = ncol(param_scaled),
-  mdn_components = 4,
-  hidden_dims = c(64, 64)
+  input_dim = ncol(output_scaled),
+  output_dim = ncol(input_scaled),
+  mdn_components = 5,
+  hidden_dims = c(64, 128, 64)
 )()
 
 inverse_optimizer <- optim_adam(inverse_model$parameters, lr = 0.01)
@@ -162,11 +199,11 @@ inverse_fit <- probotTrainMDN(
   model = inverse_model,
   dataloader = inverse_loader,
   optimizer = inverse_optimizer,
-  epochs = 25,
-  n_components = 4,
+  epochs = 100,
+  mdn_components = 5,
   lambda = 0.05,
-  verbose = FALSE,
-  early_stop = TRUE,
+  verbose = TRUE,
+  early_stop = FALSE,
   stop_window = 5,
   stop_delta = 1e-3
 )
@@ -175,24 +212,23 @@ inverse_fit <- probotTrainMDN(
 Given an observed polynomial output, we predict a posterior distribution over the original inputs.
 
 ```{r inverse-predict}
-obs_test_scaled <- poly_test$output
-attr(obs_test_scaled, "col_scale") <- attr(obs_scaled, "col_scale")
-obs_test_scaled <- probotScaleBackward(
-  obs_test_scaled,
-  col_means = -attr(obs_scaled, "col_scale")$col_means / attr(obs_scaled, "col_scale")$col_sds,
-  col_sds = 1 / attr(obs_scaled, "col_scale")$col_sds
+output_test_scaled <- poly_test$output
+output_test_scaled <- probotScaleForward(
+  output_test_scaled,
+  col_means = attr(output_scaled, "col_scale")$col_means,
+  col_sds = attr(output_scaled, "col_scale")$col_sds
 )
 
 inverse_pred <- probotPredictMDN(
-  input = obs_test_scaled,
+  input = output_test_scaled,
   model = inverse_fit$model,
-  n_components = 4
+  mdn_components = 5
 )
 
 inverse_summary <- probotMarginalPostMDN(
   mdn_output = inverse_pred,
-  col_means = attr(param_scaled, "col_scale")$col_means,
-  col_sds = attr(param_scaled, "col_scale")$col_sds,
+  col_means = attr(input_scaled, "col_scale")$col_means,
+  col_sds = attr(input_scaled, "col_scale")$col_sds,
   col_names = colnames(theta_train)
 )
 
@@ -200,20 +236,28 @@ head(round(inverse_summary$post_mean, 3))
 head(round(inverse_summary$post_sd, 3))
 ```
 
+```{r}
+for(i in 1:2){
+  magplot(theta_test[,i], inverse_summary$post_mean[,i],
+          xlab=paste0('Truth param: ',i), ylab=paste0('Pred param: ',i), pch='.')
+  magerr(theta_test[,i], inverse_summary$post_mean[,i], ylo=inverse_summary$post_sd[,i],
+         col=hsv(v=0, alpha=0.05))
+}
+```
+
 The posterior samples provide a direct way to inspect uncertainty and possible multimodality in the recovered inputs.
 
 ```{r inverse-samples}
 post_samples <- probotSamplePostMDN(
   mdn_output = inverse_pred,
-  galaxy_index = 1,
+  index = 1,
   n_samples = 2000,
-  col_means = attr(param_scaled, "col_scale")$col_means,
-  col_sds = attr(param_scaled, "col_scale")$col_sds,
+  col_means = attr(input_scaled, "col_scale")$col_means,
+  col_sds = attr(input_scaled, "col_scale")$col_sds,
   col_names = colnames(theta_train)
 )
 
 head(post_samples)
-apply(post_samples, 2, sd)
 ```
 
 Finally, we can compare the posterior mean with the true generating inputs for the held-out observations.
@@ -228,10 +272,10 @@ comparison <- data.frame(
 comparison
 ```
 
-This forward-and-inverse workflow captures the core ProBot interface:
+This forward-and-inverse workflow captures the core **ProBot** interface:
 
-- `probotScaleForward()` and `probotScaleBackward()` for standardisation.
-- `probotDataLoader()` to assemble batched training data.
+- `probotScaleForward()` and `probotScaleBackward()` for scaling
+- `probotDataLoader()` to assemble batched training data for Torch.
 - `probotMakeMDN()` to define the MDN architecture.
 - `probotTrainMDN()` to optimise the network.
 - `probotPredictMDN()`, `probotMarginalPostMDN()`, and `probotSamplePostMDN()` to summarise and sample from the predictive posterior.

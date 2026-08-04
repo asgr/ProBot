@@ -20,7 +20,7 @@ probotMakeMDN(
 
   \item{output_dim}{Number of target dimensions.}
 
-  \item{mdn_components}{Number of Gaussian mixture components.}
+  \item{mdn_components}{Number of Gaussian mixture components in model.}
 
   \item{hidden_dims}{Integer vector of hidden layer widths.}
 

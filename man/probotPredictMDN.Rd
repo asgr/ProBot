@@ -6,14 +6,14 @@ Run a trained Mixture Density Network on new input data and return unpacked
 mixture parameters.
 }
 \usage{
-probotPredictMDN(input, model, n_components)
+probotPredictMDN(input, model, mdn_components)
 }
 \arguments{
-  \item{input}{Numeric matrix of predictors with rows as observations.}
+  \item{input}{Numeric matrix of predictors with rows as observations. In this context \option{input} needs to be scaled (e.g. with \code{\link{probotScaleForward}}).}
 
   \item{model}{Instantiated torch module returned by \code{probotMakeMDN(... )()}.}
 
-  \item{n_components}{Number of Gaussian mixture components in \code{model}.}
+  \item{mdn_components}{Number of Gaussian mixture components in \code{model}.}
 }
 \details{
 Prediction runs in evaluation mode and without gradient tracking.
