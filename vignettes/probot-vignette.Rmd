@@ -105,8 +105,13 @@ head(forward_fit$history)
 We can now predict polynomial outputs for new inputs and convert posterior summaries back to the original scale.
 
 ```{r forward-predict}
-theta_test_scaled <- collapse::TRA(theta_test, attr(input_scaled, "col_scale")$col_means, "-")
-theta_test_scaled <- collapse::TRA(theta_test_scaled, attr(input_scaled, "col_scale")$col_sds, "/")
+theta_test_scaled <- theta_test
+attr(theta_test_scaled, "col_scale") <- attr(input_scaled, "col_scale")
+theta_test_scaled <- probotScaleBackward(
+  theta_test_scaled,
+  col_means = -attr(input_scaled, "col_scale")$col_means / attr(input_scaled, "col_scale")$col_sds,
+  col_sds = 1 / attr(input_scaled, "col_scale")$col_sds
+)
 
 forward_pred <- probotPredictMDN(
   input = theta_test_scaled,
@@ -170,8 +175,13 @@ inverse_fit <- probotTrainMDN(
 Given an observed polynomial output, we predict a posterior distribution over the original inputs.
 
 ```{r inverse-predict}
-obs_test_scaled <- collapse::TRA(poly_test$output, attr(obs_scaled, "col_scale")$col_means, "-")
-obs_test_scaled <- collapse::TRA(obs_test_scaled, attr(obs_scaled, "col_scale")$col_sds, "/")
+obs_test_scaled <- poly_test$output
+attr(obs_test_scaled, "col_scale") <- attr(obs_scaled, "col_scale")
+obs_test_scaled <- probotScaleBackward(
+  obs_test_scaled,
+  col_means = -attr(obs_scaled, "col_scale")$col_means / attr(obs_scaled, "col_scale")$col_sds,
+  col_sds = 1 / attr(obs_scaled, "col_scale")$col_sds
+)
 
 inverse_pred <- probotPredictMDN(
   input = obs_test_scaled,
