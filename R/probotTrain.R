@@ -110,7 +110,7 @@ probotTrainMDN <- function(model,
 
     loss_history <- c(loss_history, metrics$loss)
 
-    if (verbose) {
+    if (verbose && (epoch %% 10 == 0 || epoch == 1)) {
       cat(
         sprintf(
           paste0(
