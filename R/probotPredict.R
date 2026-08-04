@@ -1,4 +1,4 @@
-probotPredictMDN <- function(input, model, n_components){
+probotPredictMDN <- function(input, model, mdn_components){
 
   model$eval()
 
@@ -13,12 +13,12 @@ probotPredictMDN <- function(input, model, n_components){
 
   })
 
-  .probotUnpackMDN(output, n_components)
+  .probotUnpackMDN(output, mdn_components)
 }
 
 probotSamplePostMDN <- function(
     mdn_output,
-    galaxy_index = 1,
+    index = 1,
     n_samples = 5000,
     col_means,
     col_sds,
@@ -27,37 +27,37 @@ probotSamplePostMDN <- function(
 
   n_dim <- length(col_means)
 
-  n_components <- length(
+  mdn_components <- length(
     as.numeric(
-      mdn_output$logits[galaxy_index,]
+      mdn_output$logits[index,]
     )
   )
 
   weights <- as.numeric(
     nnf_softmax(
-      mdn_output$logits[galaxy_index,],
+      mdn_output$logits[index,],
       dim = 1
     )
   )
 
   mu <- as.matrix(
     mdn_output$mu[
-      galaxy_index,
-      1:n_components,
+      index,
+      1:mdn_components,
       1:n_dim
     ]
   )
 
   sigma <- 10^as.matrix(
     mdn_output$log10_sigma[
-      galaxy_index,
-      1:n_components,
+      index,
+      1:mdn_components,
       1:n_dim
     ]
   )
 
   comp <- sample(
-    1:n_components,
+    1:mdn_components,
     n_samples,
     replace = TRUE,
     prob = weights
@@ -69,7 +69,7 @@ probotSamplePostMDN <- function(
     n_dim
   )
 
-  for(k in 1:n_components){
+  for(k in 1:mdn_components){
 
     idx <- which(comp == k)
 

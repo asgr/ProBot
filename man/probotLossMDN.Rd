@@ -6,7 +6,7 @@ Compute the Mixture Density Network loss as mean negative log-likelihood of
 targets under a Gaussian mixture.
 }
 \usage{
-probotLossMDN(output_true, output_pred, n_components)
+probotLossMDN(output_true, output_pred, mdn_components)
 }
 \arguments{
   \item{output_true}{Torch tensor of true targets with shape
@@ -14,12 +14,10 @@ probotLossMDN(output_true, output_pred, n_components)
 
   \item{output_pred}{Torch tensor of raw MDN outputs from the network.}
 
-  \item{n_components}{Number of Gaussian mixture components used by the model.}
+  \item{mdn_components}{Number of Gaussian mixture components used by the model.}
 }
 \details{
-The function unpacks predicted means, log-scales, and mixture logits; applies
-numerically stable log-sum-exp aggregation over components; and returns the
-average negative log-likelihood.
+The function unpacks predicted means, log-scales, and mixture logits; applies numerically stable log-sum-exp aggregation over components; and returns the average negative log-likelihood.
 }
 \value{
 A scalar torch tensor containing the loss value.
@@ -39,7 +37,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   y <- torch::torch_randn(c(4, 1))
 
   pred <- model(x)
-  loss <- probotLossMDN(y, pred, n_components = 2)
+  loss <- probotLossMDN(y, pred, mdn_components = 2)
 
   as.numeric(loss$item())
 }

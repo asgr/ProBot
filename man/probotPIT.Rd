@@ -70,7 +70,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   model <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3)()
   x     <- matrix(rnorm(20), ncol = 2)
-  pred  <- probotPredictMDN(x, model, n_components = 3)
+  pred  <- probotPredictMDN(x, model, mdn_components = 3)
 
   # True parameter values (10 observations x 2 parameters)
   params <- matrix(rnorm(20), nrow = 10, ncol = 2)

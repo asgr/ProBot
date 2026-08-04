@@ -1,6 +1,11 @@
-probotScaleForward = function(input){
-  col_means = collapse::fmean(input, na.rm = TRUE)
-  col_sds = collapse::fsd(input, na.rm = TRUE)
+probotScaleForward = function(input, col_means=NULL, col_sds=NULL){
+  if(is.null(col_means)){
+    col_means = collapse::fmean(input, na.rm = TRUE)
+  }
+  
+  if(is.null(col_sds)){
+    col_sds = collapse::fsd(input, na.rm = TRUE)
+  }
 
   output = collapse::TRA(input, col_means, "-")
   output = collapse::TRA(output, col_sds, "/")

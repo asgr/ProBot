@@ -11,7 +11,7 @@ probotDataLoader <- function(input,
 
   output_train <- torch_tensor(output[train_idx, ], dtype = torch_float())
 
-  dataset <- tensor_dataset(x = input_train, y = output_train)
+  dataset <- tensor_dataset(input_train, output_train)
 
   dataloader <- dataloader(dataset, batch_size = batch, shuffle = shuffle)
 
@@ -21,7 +21,7 @@ probotDataLoader <- function(input,
 probotSingleEpochMDN <- function(model,
                                  dataloader,
                                  optimizer,
-                                 n_components,
+                                 mdn_components,
                                  lambda = 0.01) {
   model$train()
 
@@ -30,32 +30,32 @@ probotSingleEpochMDN <- function(model,
   running_rmse <- 0
   running_sigma <- 0
 
-  running_mix <- numeric(n_components)
+  running_mix <- numeric(mdn_components)
 
   n_batches <- 0
 
   coro::loop(for (batch in dataloader) {
     optimizer$zero_grad()
 
-    output_pred <- model(batch$x)
+    output_pred <- model(batch[[1]])
 
-    p <- .probotUnpackMDN(output_pred, n_components)
+    p <- .probotUnpackMDN(output_pred, mdn_components)
 
     weights <- nnf_softmax(p$logits, dim = 2)
 
     mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
 
-    mse_loss <- ((batch$y - mu_mix)^2)$mean()
+    mse_loss <- ((batch[[2]] - mu_mix)^2)$mean()
 
-    mae <- (batch$y - mu_mix)$abs()$mean()$item()
+    mae <- (batch[[2]] - mu_mix)$abs()$mean()$item()
 
-    rmse <- ((batch$y - mu_mix)^2)$mean()$sqrt()$item()
+    rmse <- ((batch[[2]] - mu_mix)^2)$mean()$sqrt()$item()
 
     mean_sigma <- (10^torch_clamp(p$log10_sigma, min = -5, max = 5))$mean()$item()
 
     mix_use <- apply(as.array(weights), 2, mean)
 
-    loss <- probotLossMDN(batch$y, output_pred, n_components) + lambda * mse_loss
+    loss <- probotLossMDN(batch[[2]], output_pred, mdn_components) + lambda * mse_loss
 
     loss$backward()
 
@@ -84,7 +84,7 @@ probotTrainMDN <- function(model,
                            dataloader,
                            optimizer,
                            epochs = 100,
-                           n_components,
+                           mdn_components,
                            lambda = 0.01,
                            checkpoint_dir = NULL,
                            checkpoint_every = 10,
@@ -102,7 +102,7 @@ probotTrainMDN <- function(model,
       model = model,
       dataloader = dataloader,
       optimizer = optimizer,
-      n_components = n_components,
+      mdn_components = mdn_components,
       lambda = lambda
     )
 
@@ -110,7 +110,7 @@ probotTrainMDN <- function(model,
 
     loss_history <- c(loss_history, metrics$loss)
 
-    if (verbose) {
+    if (verbose && (epoch %% 10 == 0 || epoch == 1)) {
       cat(
         sprintf(
           paste0(
