@@ -11,8 +11,10 @@ vignette: >
 knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
 library(ProBot)
 library(torch)
+library(magicaxis)
 set.seed(1)
 torch_manual_seed(1)
+eval_global = FALSE
 ```
 
 ## Overview
@@ -23,7 +25,7 @@ torch_manual_seed(1)
 
 We define a generative function that turns two input parameters into three polynomial coefficients. Those coefficients are then evaluated on a fixed grid.
 
-```{r}
+```{r, eval=eval_global}
 make_polynomial_output <- function(theta) {
   a0 <- 0.3 + 0.8 * theta[, 1] - 0.4 * theta[, 2]
   a1 <- -1.2 + 0.5 * theta[, 1]^2 + 0.7 * theta[, 2]
@@ -59,7 +61,7 @@ poly_test <- make_polynomial_output(theta_test)
 
 For supervised learning, we standardise the inputs and outputs before creating a data loader.
 
-```{r forward-prep}
+```{r forward-prep, eval=eval_global}
 input_scaled <- probotScaleForward(theta_train)
 output_scaled <- probotScaleForward(poly_train$output)
 
@@ -72,7 +74,7 @@ dataloader <- probotDataLoader(
 
 Next we build an MDN that predicts the polynomial values directly from the inputs.
 
-```{r forward-train}
+```{r forward-train, eval=eval_global}
 forward_model <- probotMakeMDN(
   input_dim = ncol(input_scaled),
   output_dim = ncol(output_scaled),
@@ -98,14 +100,14 @@ forward_fit <- probotTrainMDN(
 
 The training history records the main optimisation diagnostics.
 
-```{r forward-history}
+```{r forward-history, eval=eval_global}
 head(forward_fit$history)
 tail(forward_fit$history)
 ```
 
 We can now predict polynomial outputs for new inputs and convert posterior summaries back to the original scale.
 
-```{r forward-predict}
+```{r forward-predict, eval=eval_global}
 theta_test_scaled <- theta_test
 theta_test_scaled <- probotScaleForward(
   theta_test_scaled,
@@ -131,11 +133,11 @@ round(forward_summary$post_mean[1:3,], 3)
 
 A quick mean absolute error on the test set shows that the model can recover the polynomial output well.
 
-```{r forward-metrics}
+```{r forward-metrics, eval=eval_global}
 mean(abs(forward_summary$post_mean - poly_test$output))
 ```
 
-```{r forward-samples}
+```{r forward-samples, eval=eval_global}
 post_samples <- probotSamplePostMDN(
   mdn_output = forward_pred,
   index = 1,
@@ -148,11 +150,11 @@ post_samples <- probotSamplePostMDN(
 head(post_samples)
 ```
 
-```{r fig.width=6, fig.height=6}
+```{r fig.width=6, fig.height=6, eval=eval_global}
 magtri(post_samples, refvals = poly_test$output[1,])
 ```
 
-```{r}
+```{r, eval=eval_global}
 for(i in 1:9){
   magplot(poly_test$output[,i], forward_summary$post_mean[,i],
           xlab=paste0('Truth output: ',i), ylab=paste0('Pred output: ',i), pch='.')
@@ -162,7 +164,7 @@ for(i in 1:9){
 }
 ```
 
-```{r}
+```{r, eval=eval_global}
 PIT_out = probotPIT(forward_pred,
             params = poly_test$output,
             col_means = attr(output_scaled, "col_scale")$col_means,
@@ -171,7 +173,7 @@ PIT_out = probotPIT(forward_pred,
 )
 ```
 
-```{r fig.width=6, fig.height=6}
+```{r fig.width=6, fig.height=6, eval=eval_global}
 magtri(PIT_out)
 ```
 
@@ -179,7 +181,7 @@ magtri(PIT_out)
 
 For the inverse problem, the polynomial values are the inputs and the latent parameters are the targets. This is where the MDN is especially useful because multiple parameter settings can explain similar outputs. Perhaps the most interesting aspect is the ability for MDN to properly infer posterior errors, allowing extremely efficient Bayesian style inference once properly trained.
 
-```{r inverse-prep}
+```{r inverse-prep, eval=eval_global}
 inverse_loader <- probotDataLoader(
   input = output_scaled, #we reuse these, but swap the order
   output = input_scaled, #we reuse these, but swap the order
@@ -211,7 +213,7 @@ inverse_fit <- probotTrainMDN(
 
 Given an observed polynomial output, we predict a posterior distribution over the original inputs.
 
-```{r inverse-predict}
+```{r inverse-predict, eval=eval_global}
 output_test_scaled <- poly_test$output
 output_test_scaled <- probotScaleForward(
   output_test_scaled,
@@ -236,7 +238,7 @@ head(round(inverse_summary$post_mean, 3))
 head(round(inverse_summary$post_sd, 3))
 ```
 
-```{r}
+```{r, eval=eval_global}
 for(i in 1:2){
   magplot(theta_test[,i], inverse_summary$post_mean[,i],
           xlab=paste0('Truth param: ',i), ylab=paste0('Pred param: ',i), pch='.')
@@ -247,7 +249,7 @@ for(i in 1:2){
 
 The posterior samples provide a direct way to inspect uncertainty and possible multimodality in the recovered inputs.
 
-```{r inverse-samples}
+```{r inverse-samples, eval=eval_global}
 post_samples <- probotSamplePostMDN(
   mdn_output = inverse_pred,
   index = 1,
@@ -262,7 +264,7 @@ head(post_samples)
 
 Finally, we can compare the posterior mean with the true generating inputs for the held-out observations.
 
-```{r inverse-metrics}
+```{r inverse-metrics, eval=eval_global}
 comparison <- data.frame(
   parameter = colnames(theta_test),
   truth = as.numeric(theta_test[1, ]),

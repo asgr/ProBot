@@ -27,7 +27,7 @@ probotSamplePostMDN <- function(
 
   n_dim <- length(col_means)
 
-  n_components <- length(
+  mdn_components <- length(
     as.numeric(
       mdn_output$logits[index,]
     )
@@ -43,7 +43,7 @@ probotSamplePostMDN <- function(
   mu <- as.matrix(
     mdn_output$mu[
       index,
-      1:n_components,
+      1:mdn_components,
       1:n_dim
     ]
   )
@@ -51,13 +51,13 @@ probotSamplePostMDN <- function(
   sigma <- 10^as.matrix(
     mdn_output$log10_sigma[
       index,
-      1:n_components,
+      1:mdn_components,
       1:n_dim
     ]
   )
 
   comp <- sample(
-    1:n_components,
+    1:mdn_components,
     n_samples,
     replace = TRUE,
     prob = weights
@@ -69,7 +69,7 @@ probotSamplePostMDN <- function(
     n_dim
   )
 
-  for(k in 1:n_components){
+  for(k in 1:mdn_components){
 
     idx <- which(comp == k)
 

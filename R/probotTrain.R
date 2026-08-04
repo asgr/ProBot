@@ -11,7 +11,7 @@ probotDataLoader <- function(input,
 
   output_train <- torch_tensor(output[train_idx, ], dtype = torch_float())
 
-  dataset <- tensor_dataset(x = input_train, y = output_train)
+  dataset <- tensor_dataset(input_train, output_train)
 
   dataloader <- dataloader(dataset, batch_size = batch, shuffle = shuffle)
 
@@ -37,7 +37,7 @@ probotSingleEpochMDN <- function(model,
   coro::loop(for (batch in dataloader) {
     optimizer$zero_grad()
 
-    output_pred <- model(batch$x)
+    output_pred <- model(batch[[1]])
 
     p <- .probotUnpackMDN(output_pred, mdn_components)
 
@@ -45,17 +45,17 @@ probotSingleEpochMDN <- function(model,
 
     mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
 
-    mse_loss <- ((batch$y - mu_mix)^2)$mean()
+    mse_loss <- ((batch[[2]] - mu_mix)^2)$mean()
 
-    mae <- (batch$y - mu_mix)$abs()$mean()$item()
+    mae <- (batch[[2]] - mu_mix)$abs()$mean()$item()
 
-    rmse <- ((batch$y - mu_mix)^2)$mean()$sqrt()$item()
+    rmse <- ((batch[[2]] - mu_mix)^2)$mean()$sqrt()$item()
 
     mean_sigma <- (10^torch_clamp(p$log10_sigma, min = -5, max = 5))$mean()$item()
 
     mix_use <- apply(as.array(weights), 2, mean)
 
-    loss <- probotLossMDN(batch$y, output_pred, mdn_components) + lambda * mse_loss
+    loss <- probotLossMDN(batch[[2]], output_pred, mdn_components) + lambda * mse_loss
 
     loss$backward()
 

@@ -37,7 +37,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 3)()
   x <- matrix(rnorm(12), ncol = 2)
 
-  pred <- probotPredictMDN(x, model, n_components = 3)
+  pred <- probotPredictMDN(x, model, mdn_components = 3)
   pred$mu$size()
 }
 }

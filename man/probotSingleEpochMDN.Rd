@@ -67,18 +67,18 @@ Aaron Robotham
 if (requireNamespace("torch", quietly = TRUE)) {
   torch::torch_manual_seed(1)
 
-  x <- matrix(rnorm(40), ncol = 2)
-  y <- matrix(rnorm(20), ncol = 1)
+  x <- matrix(rnorm(60), ncol = 3)
+  y <- matrix(rnorm(40), ncol = 2)
 
   loader <- probotDataLoader(x, y, batch = 5, shuffle = FALSE)
-  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
+  model <- probotMakeMDN(input_dim = 3, output_dim = 2, mdn_components = 2)()
   opt <- torch::optim_adam(model$parameters, lr = 0.01)
 
   metrics <- probotSingleEpochMDN(
     model = model,
     dataloader = loader,
     optimizer = opt,
-    n_components = 2,
+    mdn_components = 2,
     lambda = 0.01
   )
 

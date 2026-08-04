@@ -57,7 +57,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
   x <- matrix(rnorm(8), ncol = 2)
-  pred <- probotPredictMDN(x, model, n_components = 2)
+  pred <- probotPredictMDN(x, model, mdn_components = 2)
 
   draws <- probotSamplePostMDN(
     mdn_output = pred,

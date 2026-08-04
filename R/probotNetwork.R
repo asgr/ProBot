@@ -26,20 +26,20 @@ probotMakeMDN <- function(input_dim, output_dim, mdn_components, hidden_dims = c
   )
 }
 
-.probotUnpackMDN <- function(output, n_components){
+.probotUnpackMDN <- function(output, mdn_components){
 
   batch_size <- output$size(1)
 
   output_features <- output$size(2)
 
-  output_dim <- (output_features / n_components - 1) / 2
+  output_dim <- (output_features / mdn_components - 1) / 2
 
   stopifnot(output_dim == as.integer(output_dim))
 
   output_dim <- as.integer(output_dim)
 
   output <- output$view(
-    c(batch_size, n_components, 2 * output_dim + 1)
+    c(batch_size, mdn_components, 2 * output_dim + 1)
   )
 
   list(
@@ -54,14 +54,16 @@ probotMakeMDN <- function(input_dim, output_dim, mdn_components, hidden_dims = c
 probotLossMDN <- function(
     output_true,
     output_pred,
-    n_components
+    mdn_components
 ){
 
+  if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
+  
   output_dim <- output_true$size(2)
 
   p <- .probotUnpackMDN(
     output_pred,
-    n_components
+    mdn_components
   )
 
   mu <- p$mu
@@ -79,7 +81,7 @@ probotLossMDN <- function(
   y_true <- y_true$expand(
     c(
       y_true$size(1),
-      n_components,
+      mdn_components,
       output_dim
     )
   )
