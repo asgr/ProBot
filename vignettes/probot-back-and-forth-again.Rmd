@@ -14,7 +14,7 @@ library(torch)
 library(magicaxis)
 set.seed(42)
 torch_manual_seed(42)
-eval_global <- FALSE
+eval_global <- TRUE
 ```
 
 ## Overview

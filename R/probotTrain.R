@@ -19,38 +19,44 @@ probotDataLoader <- function(input,
 }
 
 probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components, loss_fn = probotLossMDN) {
-  model$train()  
+  model$train()
   running_loss <- 0
   running_mae <- 0
   running_rmse <- 0
-  running_sigma <- 0  
-  running_mix <- numeric(mdn_components)  
-  n_batches <- 0  
-  
+  running_sigma <- 0
+  running_mix <- numeric(mdn_components)
+  n_batches <- 0
+
   coro::loop(for (batch in dataloader) {
-    optimizer$zero_grad()  
-    output_pred <- model(batch[[1]])  
-    
+    optimizer$zero_grad()
+    output_pred <- model(batch[[1]])
+
     # Switch to the specified loss_fn function
     current_loss <- loss_fn(batch[[2]], output_pred, mdn_components)
     current_loss$backward()
     optimizer$step()
-    
+
     # Unpack for logging/metrics (unchanged)
-    p <- .probotUnpackMDN(output_pred, mdn_components)  
-    weights <- nnf_softmax(p$logits, dim = 2)  
-    mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)  
-    
+    p <- .probotUnpackMDN(output_pred, mdn_components)
+    weights <- nnf_softmax(p$logits, dim = 2)
+    mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
+
+    #Other things to monitor
+    mean_sigma <- (10^torch_clamp(p$log10_sigma, min = -5, max = 5))$mean()$item()
+    mix_use <- apply(as.array(weights), 2, mean)
+
     # Accumulate metrics for epoch reporting
     running_loss <- running_loss + current_loss$item() * length(batch[[1]])
     running_mae <- running_mae + torch::torch_abs(batch[[2]] - mu_mix)$sum()$item()
     running_rmse <- running_rmse + ((batch[[2]] - mu_mix)^2)$sum()$item()
-    
+    running_sigma <- running_sigma + mean_sigma
+    running_mix <- running_mix + mix_use
+
     # [Insert your existing sigma/mix tracking logic here]
-    
+
     n_batches <- n_batches + 1
   })
-  
+
   list(
     loss = running_loss / length(dataloader$dataset),
     mae = running_mae / length(dataloader$dataset),
