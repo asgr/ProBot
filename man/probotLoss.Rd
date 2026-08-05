@@ -5,9 +5,9 @@
 \alias{probotLossMAE}
 \alias{probotLossMAPE}
 \alias{probotLossHuber}
-\title{Compute Negative Log-Likelihood for an MDN Output}
+\title{Compute Loss Values for an MDN Output}
 \description{
-Various useful loss functions. Compute the Mixture Density Network (MDN) loss as mean negative log-likelihood of targets under a Gaussian mixture. Compute the Mean Standard Error (MSE) loss. Compute the Mean Absolute Error (MAE) loss. Compute the Mean Absolute Percentage Error (MAPE) loss. Compute the Huber loss.
+Compute loss values from Mixture Density Network (MDN) outputs. \code{probotLossMDN} computes mean negative log-likelihood of targets under a Gaussian mixture. \code{probotLossMSE} computes Mean Squared Error. \code{probotLossMAE} computes Mean Absolute Error. \code{probotLossMAPE} computes Mean Absolute Percentage Error (as a percentage). \code{probotLossHuber} computes the Huber loss.
 }
 \usage{
 probotLossMDN(output_true, output_pred, mdn_components)
@@ -18,7 +18,7 @@ probotLossMAE(output_true, output_pred, mdn_components)
 
 probotLossMAPE(output_true, output_pred, mdn_components)
 
-probotLossHuber(output_true, output_pred, mdn_components)
+probotLossHuber(output_true, output_pred, mdn_components, delta = 1.0)
 }
 \arguments{
   \item{output_true}{Torch tensor of true targets with shape
@@ -27,9 +27,11 @@ probotLossHuber(output_true, output_pred, mdn_components)
   \item{output_pred}{Torch tensor of raw MDN outputs from the network.}
 
   \item{mdn_components}{Number of Gaussian mixture components used by the model.}
+
+  \item{delta}{Threshold for the Huber loss: errors below \code{delta} are penalized quadratically, errors above are penalized linearly. Only used by \code{probotLossHuber}. Default is 1.0.}
 }
 \details{
-The function unpacks predicted means, log-scales, and mixture logits; applies numerically stable log-sum-exp aggregation over components; and returns the average negative log-likelihood (\code{probotLossMDN}) or MSE (\code{probotLossMSE}).
+All functions unpack the raw network output into predicted means, scales, and mixture logits using an internal helper. For \code{probotLossMDN}, numerically stable log-sum-exp aggregation over components yields the mean negative log-likelihood. For \code{probotLossMSE}, \code{probotLossMAE}, \code{probotLossMAPE}, and \code{probotLossHuber}, the predicted mixture-mean (weighted average of component means) is compared to the true targets using squared error, absolute error, absolute percentage error, or Huber loss respectively.
 }
 \value{
 A scalar torch tensor containing the loss value.

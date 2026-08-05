@@ -18,45 +18,49 @@ probotDataLoader <- function(input,
   return(dataloader)
 }
 
-probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components, loss_fn = probotLossMDN) {
+probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components, 
+                                 loss_fn = probotLossMDN, lambda = 0) {
   model$train()
-  running_loss <- 0
-  running_mae <- 0
-  running_rmse <- 0
-  running_sigma <- 0
-  running_mix <- numeric(mdn_components)
-  n_batches <- 0
-
+  running_loss <- 0; running_mae <- 0; running_rmse <- 0
+  running_sigma <- 0; running_mix <- numeric(mdn_components); n_batches <- 0
+  
   coro::loop(for (batch in dataloader) {
     optimizer$zero_grad()
     output_pred <- model(batch[[1]])
-
-    # Switch to the specified loss_fn function
+    
+    # 1. Compute primary loss (tensor)
     current_loss <- loss_fn(batch[[2]], output_pred, mdn_components)
-    current_loss$backward()
-    optimizer$step()
-
-    # Unpack for logging/metrics (unchanged)
+    
+    # Unpack for metrics & mixture mean
     p <- .probotUnpackMDN(output_pred, mdn_components)
     weights <- nnf_softmax(p$logits, dim = 2)
     mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
-
-    #Other things to monitor
-    mean_sigma <- (10^torch_clamp(p$log10_sigma, min = -5, max = 5))$mean()$item()
-    mix_use <- apply(as.array(weights), 2, mean)
-
-    # Accumulate metrics for epoch reporting
+    
+    # 2. Compute MSE as a tensor to preserve gradient flow
+    mse_loss <- ((batch[[2]] - mu_mix)^2)$mean()
+    
+    # 3. Blend losses on tensors BEFORE backward()
+    if (lambda > 0) {
+      current_loss <- current_loss * (1 - lambda) + mse_loss * lambda
+    }
+    
+    # 4. Backpropagate & step
+    current_loss$backward()
+    optimizer$step()
+    
+    # 5. Safe to detach for logging AFTER gradients are captured
     running_loss <- running_loss + current_loss$item() * length(batch[[1]])
     running_mae <- running_mae + torch::torch_abs(batch[[2]] - mu_mix)$sum()$item()
     running_rmse <- running_rmse + ((batch[[2]] - mu_mix)^2)$sum()$item()
+    
+    # Sigma/Mix tracking (unchanged)
+    mean_sigma <- (10^torch_clamp(p$log10_sigma, min = -5, max = 5))$mean()$item()
+    mix_use <- apply(as.array(weights), 2, mean)
     running_sigma <- running_sigma + mean_sigma
     running_mix <- running_mix + mix_use
-
-    # [Insert your existing sigma/mix tracking logic here]
-
     n_batches <- n_batches + 1
   })
-
+  
   list(
     loss = running_loss / length(dataloader$dataset),
     mae = running_mae / length(dataloader$dataset),
@@ -72,6 +76,7 @@ probotTrainMDN <- function(model,
                            epochs = 100,
                            mdn_components,
                            loss_fn = probotLossMDN,
+                           lambda = 0,
                            checkpoint_dir = NULL,
                            checkpoint_every = 10,
                            history = NULL,
@@ -89,7 +94,8 @@ probotTrainMDN <- function(model,
       dataloader = dataloader,
       optimizer = optimizer,
       mdn_components = mdn_components,
-      loss_fn = loss_fn
+      loss_fn = loss_fn,
+      lambda = lambda
     )
 
     history_list[[epoch]] <- c(list(epoch = epoch), metrics)
