@@ -21,9 +21,29 @@ eval_global = FALSE
 
 **ProBot** provides a compact interface for training mixture density networks (MDNs) with `torch`. This vignette demonstrates the main workflow on a toy problem where a generative function maps input parameters to the coefficients of a polynomial response, and then shows the inverse problem where we recover plausible inputs from an observed output.
 
+### What is a Mixture Density Network?
+
+A standard neural network outputs a single point prediction for each input. A **Mixture Density Network** (MDN) instead outputs the parameters of a mixture of Gaussian distributions, allowing the network to represent an entire *probability distribution* over the target rather than a single value. Concretely, for a given input **x** the MDN produces:
+
+- **mixing weights** π_k (summing to 1 across the K components),
+- **means** μ_k for each Gaussian component, and
+- **standard deviations** σ_k for each component.
+
+The predictive density is then p(y | x) = Σ_k π_k N(y; μ_k, σ_k²). This is especially powerful when the mapping from inputs to outputs is one-to-many or genuinely stochastic, because the mixture can represent multimodal, skewed, or otherwise non-Gaussian posteriors. In the forward direction this lets us capture prediction uncertainty; in the inverse direction it lets the network represent the full posterior over latent parameters given an observation.
+
+### Posterior calibration diagnostics
+
+After training we want to verify that the uncertainty reported by the MDN is *well-calibrated* — that is, that its credible intervals actually contain the truth at the stated rate. **ProBot** provides two complementary diagnostics for this:
+
+**PIT (Probability Integral Transform).** For each test observation and each output dimension, the PIT value is the fraction of posterior samples that fall *below* the true value. If the posterior is perfectly calibrated, the true value is equally likely to land anywhere in the predictive distribution, so the PIT values should be uniformly distributed on [0, 1]. Systematic deviations from uniformity reveal bias (values clustered near 0 or 1) or over/under-dispersion (U-shaped or Λ-shaped histograms).
+
+**TARP (Test of Accuracy with Random Points).** PIT is computed independently for each output dimension and therefore cannot detect calibration failures that only appear in the *joint* posterior. TARP addresses this by projecting both the posterior samples and the true parameter vector onto a random unit direction before computing the coverage fraction. Averaging over many random directions provides an omnibus test of joint calibration: under a well-calibrated posterior the TARP values are also uniform on [0, 1]. A tendency of the values toward 0.5 indicates over-dispersion (posteriors too wide), and bimodal concentrations near 0 and 1 indicate under-dispersion (posteriors too narrow).
+
+---
+
 ## Example 1: infer the polynomial output from inputs
 
-We define a generative function that turns two input parameters into three polynomial coefficients. Those coefficients are then evaluated on a fixed grid.
+We define a generative function that turns two input parameters (`u`, `v`) into three polynomial coefficients (`a0`, `a1`, `a2`). Those coefficients are then evaluated on a fixed grid of nine equally spaced points in [−1, 1], giving a nine-dimensional output vector. The nonlinear dependence on `u` (via `sin` and squaring) means the forward mapping is not trivially invertible, which is precisely the kind of problem where MDNs excel.
 
 ```{r, eval=eval_global}
 make_polynomial_output <- function(theta) {
@@ -59,7 +79,9 @@ poly_train <- make_polynomial_output(theta_train)
 poly_test <- make_polynomial_output(theta_test)
 ```
 
-For supervised learning, we standardise the inputs and outputs before creating a data loader.
+### Scaling and data loading
+
+Neural networks train most efficiently when inputs and outputs are on comparable scales. `probotScaleForward()` standardises each column to zero mean and unit variance and attaches the centering and scaling parameters as attributes so that the same transform can later be applied to new data or reversed on predictions.
 
 ```{r forward-prep, eval=eval_global}
 input_scaled <- probotScaleForward(theta_train)
@@ -72,7 +94,11 @@ dataloader <- probotDataLoader(
 )
 ```
 
-Next we build an MDN that predicts the polynomial values directly from the inputs.
+`probotDataLoader()` wraps the training matrices in a `torch` `dataset` and returns a `dataloader` that shuffles and batches observations during training. The batch size of 1024 is a sensible default for datasets of this size; smaller batches introduce more gradient noise (which can help escape local optima) while larger batches give smoother but slower updates.
+
+### Building and training the forward MDN
+
+We build an MDN with a three-layer encoder (64 → 128 → 64 hidden units) and five Gaussian mixture components. Five components give the network enough flexibility to represent multimodal or skewed predictive distributions without being unnecessarily large.
 
 ```{r forward-train, eval=eval_global}
 forward_model <- probotMakeMDN(
@@ -98,14 +124,22 @@ forward_fit <- probotTrainMDN(
 )
 ```
 
-The training history records the main optimisation diagnostics.
+The `lambda` parameter is an L2 regularisation weight applied to the network parameters to discourage overfitting. `early_stop = FALSE` runs for the full 100 epochs here; in practice you would set `early_stop = TRUE` and tune `stop_window` and `stop_delta` so that training halts automatically once the loss has plateaued.
+
+### Inspecting the training history
+
+`probotTrainMDN()` returns a data frame recording the negative log-likelihood loss at each epoch. Inspecting the first and last few rows lets you check that the loss decreased steadily and did not plateau prematurely or diverge.
 
 ```{r forward-history, eval=eval_global}
 head(forward_fit$history)
 tail(forward_fit$history)
 ```
 
-We can now predict polynomial outputs for new inputs and convert posterior summaries back to the original scale.
+A monotonically decreasing loss that flattens toward the end of training is healthy. If the loss stops decreasing early, try a lower learning rate or more epochs. If it decreases but then increases (overfitting), reduce the network size, increase `lambda`, or enable early stopping.
+
+### Predicting on the test set
+
+Before predicting we apply the *same* scaling that was fitted on the training inputs, using the stored `col_means` and `col_sds` attributes. This is critical: using different scaling at prediction time is a common source of subtle errors.
 
 ```{r forward-predict, eval=eval_global}
 theta_test_scaled <- theta_test
@@ -131,11 +165,17 @@ forward_summary <- probotMarginalPostMDN(
 round(forward_summary$post_mean[1:3,], 3)
 ```
 
+`probotMarginalPostMDN()` collapses the full mixture distribution to per-dimension marginal summaries (posterior mean and standard deviation) back-transformed to the original scale. This is convenient for point predictions and uncertainty bars, but remember that it discards joint information about correlations between output dimensions.
+
 A quick mean absolute error on the test set shows that the model can recover the polynomial output well.
 
 ```{r forward-metrics, eval=eval_global}
 mean(abs(forward_summary$post_mean - poly_test$output))
 ```
+
+### Posterior samples and corner plot
+
+Rather than relying only on marginal summaries, we can draw samples directly from the joint predictive distribution for any single observation. This is the most faithful representation of what the MDN has learned.
 
 ```{r forward-samples, eval=eval_global}
 post_samples <- probotSamplePostMDN(
@@ -150,9 +190,15 @@ post_samples <- probotSamplePostMDN(
 head(post_samples)
 ```
 
+The triangle (corner) plot below shows the pairwise marginal distributions of the nine polynomial outputs for the first test observation. The blue reference points/lines mark the true values. Well-calibrated samples should scatter symmetrically around the truth.
+
 ```{r fig.width=6, fig.height=6, eval=eval_global}
 magtri(post_samples, refvals = poly_test$output[1,])
 ```
+
+### Truth vs. predicted scatter plots
+
+For a population-level view we plot the predicted posterior mean against the true value for each of the nine output dimensions. The grey error bars show ±1 posterior standard deviation. Points should scatter symmetrically about the diagonal, and the error bars should span the scatter.
 
 ```{r, eval=eval_global}
 for(i in 1:9){
@@ -164,6 +210,10 @@ for(i in 1:9){
 }
 ```
 
+### PIT diagnostic: checking marginal calibration
+
+The **Probability Integral Transform** (PIT) provides a rigorous marginal calibration check. For each test observation and each output dimension the PIT value is the fraction of posterior samples that fall *below* the true value. Under a perfectly calibrated posterior this quantity is uniformly distributed on [0, 1]: the truth is equally likely to appear anywhere within the predictive distribution.
+
 ```{r, eval=eval_global}
 PIT_out = probotPIT(forward_pred,
             params = poly_test$output,
@@ -173,13 +223,57 @@ PIT_out = probotPIT(forward_pred,
 )
 ```
 
+The triangle plot of the PIT matrix shows each output dimension on the diagonal as a histogram and pairwise scatter plots off-diagonal. **What to look for:**
+
+- *Uniform histograms* on the diagonal → good marginal calibration.
+- *U-shaped histograms* → the posterior is too narrow (the truth falls in the tails too often).
+- *Λ-shaped (hill) histograms* → the posterior is too wide (the truth clusters near the centre).
+- *Skewed histograms* (mass near 0 or 1) → systematic bias in the predictions.
+
 ```{r fig.width=6, fig.height=6, eval=eval_global}
 magtri(PIT_out)
 ```
 
+### TARP diagnostic: checking joint calibration
+
+PIT is computed independently for each output dimension and therefore cannot detect miscalibration that only manifests in the *joint* posterior. **TARP** (Test of Accuracy with Random Points) addresses this by projecting both the posterior samples and the true parameter vector onto a fresh random unit direction for each observation, then computing the coverage fraction along that direction. Averaging over many random directions provides a sensitive omnibus test of the full joint posterior.
+
+```{r, eval=eval_global}
+TARP_out_forward = probotTARP(
+  forward_pred,
+  params = poly_test$output,
+  col_means = attr(output_scaled, "col_scale")$col_means,
+  col_sds = attr(output_scaled, "col_scale")$col_sds,
+  col_names = colnames(output_scaled)
+)
+```
+
+The TARP values should be uniform on [0, 1] under a well-calibrated joint posterior. We can assess this with a histogram and compute the Kolmogorov–Smirnov statistic against a Uniform(0,1) reference.
+
+```{r fig.width=6, fig.height=4, eval=eval_global}
+maghist(TARP_out_forward, breaks = 20,
+        xlab = "TARP coverage", ylab = "Count",
+        main = "Forward model: TARP diagnostic")
+abline(h = length(TARP_out_forward) / 20, lty = 2, col = "red")
+
+# Kolmogorov-Smirnov test against Uniform(0, 1)
+ks.test(TARP_out_forward, "punif")
+```
+
+**Interpreting the TARP histogram:**
+
+- *Flat histogram* → the joint posterior is well calibrated.
+- *Excess mass near 0.5* → the posterior is over-dispersed (too wide in joint space).
+- *Excess mass near 0 and 1* → the posterior is under-dispersed (too narrow in joint space).
+- *Significant KS p-value* (p < 0.05) → evidence of joint miscalibration that warrants further investigation.
+
+---
+
 ## Example 2: invert the mapping with MDN uncertainty
 
-For the inverse problem, the polynomial values are the inputs and the latent parameters are the targets. This is where the MDN is especially useful because multiple parameter settings can explain similar outputs. Perhaps the most interesting aspect is the ability for MDN to properly infer posterior errors, allowing extremely efficient Bayesian style inference once properly trained.
+For the inverse problem, the polynomial values are the inputs and the latent parameters are the targets. This is where the MDN is especially useful because multiple parameter settings can explain similar outputs — the nonlinear, non-injective nature of the forward mapping means the inverse problem is genuinely ill-posed. A standard regression network could only return a single best-guess parameter vector and would silently discard the inherent ambiguity; the MDN instead returns a full posterior distribution over plausible parameter configurations for each observed polynomial.
+
+Perhaps the most important aspect of this workflow is that, once the MDN is trained, evaluating the posterior for a new observation is essentially free (a single forward pass through the network), compared to the thousands of likelihood evaluations required by traditional MCMC or nested sampling.
 
 ```{r inverse-prep, eval=eval_global}
 inverse_loader <- probotDataLoader(
@@ -211,7 +305,11 @@ inverse_fit <- probotTrainMDN(
 )
 ```
 
-Given an observed polynomial output, we predict a posterior distribution over the original inputs.
+Note that the only change relative to the forward model is that the roles of `input` and `output` are swapped in `probotDataLoader()` and the corresponding dimensions are swapped in `probotMakeMDN()`. Everything else — training loop, diagnostics, prediction — is identical.
+
+### Predicting the inverse posterior
+
+Given an observed polynomial output, we predict a posterior distribution over the original inputs. As before, we apply the *training* scaling to the test data using the stored attributes before passing it to the model.
 
 ```{r inverse-predict, eval=eval_global}
 output_test_scaled <- poly_test$output
@@ -238,6 +336,12 @@ head(round(inverse_summary$post_mean, 3))
 head(round(inverse_summary$post_sd, 3))
 ```
 
+`post_sd` gives the marginal posterior standard deviation for each parameter. Larger values indicate dimensions where the data are less informative or where the inverse problem is more degenerate.
+
+### Truth vs. predicted parameter scatter plots
+
+We plot the recovered posterior means against the true generating parameters for all 10,000 test observations. A tight, unbiased scatter around the diagonal indicates accurate recovery. The grey error bars show ±1 posterior standard deviation; roughly 68% of the true values should fall within the bars if the posterior is well calibrated.
+
 ```{r, eval=eval_global}
 for(i in 1:2){
   magplot(theta_test[,i], inverse_summary$post_mean[,i],
@@ -247,7 +351,9 @@ for(i in 1:2){
 }
 ```
 
-The posterior samples provide a direct way to inspect uncertainty and possible multimodality in the recovered inputs.
+### Posterior samples and corner plot
+
+The posterior samples provide a direct way to inspect uncertainty and possible multimodality in the recovered inputs. Because the forward mapping is nonlinear and non-injective, some observed polynomials may be consistent with multiple distinct (u, v) configurations; the MDN can represent this as a multimodal mixture.
 
 ```{r inverse-samples, eval=eval_global}
 post_samples <- probotSamplePostMDN(
@@ -262,7 +368,13 @@ post_samples <- probotSamplePostMDN(
 head(post_samples)
 ```
 
-Finally, we can compare the posterior mean with the true generating inputs for the held-out observations.
+```{r fig.width=6, fig.height=6, eval=eval_global}
+magtri(post_samples, refvals = theta_test[1, ])
+```
+
+### Summary comparison for one observation
+
+We can also compare the posterior mean and standard deviation directly against the true generating inputs for a single held-out observation, giving a concise numerical summary of the recovery quality.
 
 ```{r inverse-metrics, eval=eval_global}
 comparison <- data.frame(
@@ -274,10 +386,65 @@ comparison <- data.frame(
 comparison
 ```
 
+### PIT diagnostic for the inverse model
+
+We repeat the PIT calibration check for the inverse posterior. In the inverse problem the output space is the two-dimensional parameter space (u, v), so PIT now has two columns. Uniform histograms on the diagonal confirm that the MDN's marginal posteriors over each parameter are well calibrated.
+
+```{r, eval=eval_global}
+PIT_inverse = probotPIT(
+  inverse_pred,
+  params = theta_test,
+  col_means = attr(input_scaled, "col_scale")$col_means,
+  col_sds = attr(input_scaled, "col_scale")$col_sds,
+  col_names = colnames(theta_train)
+)
+```
+
+```{r fig.width=5, fig.height=5, eval=eval_global}
+magtri(PIT_inverse)
+```
+
+### TARP diagnostic for the inverse model
+
+Finally, we run the TARP check on the inverse posterior. The inverse problem is genuinely harder to calibrate well because the posterior over (u, v) can be multimodal or banana-shaped, and TARP is sensitive to these joint features in a way that PIT is not.
+
+```{r, eval=eval_global}
+TARP_inverse = probotTARP(
+  inverse_pred,
+  params = theta_test,
+  col_means = attr(input_scaled, "col_scale")$col_means,
+  col_sds = attr(input_scaled, "col_scale")$col_sds,
+  col_names = colnames(theta_train)
+)
+```
+
+```{r fig.width=6, fig.height=4, eval=eval_global}
+maghist(TARP_inverse, breaks = 20,
+        xlab = "TARP coverage", ylab = "Count",
+        main = "Inverse model: TARP diagnostic")
+abline(h = length(TARP_inverse) / 20, lty = 2, col = "red")
+
+ks.test(TARP_inverse, "punif")
+```
+
+A flat TARP histogram and a non-significant KS p-value provide strong evidence that the inverse MDN posterior is jointly well calibrated — a demanding standard that simultaneously validates the predicted means, uncertainties, and correlations between parameters.
+
+---
+
+## Summary
+
 This forward-and-inverse workflow captures the core **ProBot** interface:
 
-- `probotScaleForward()` and `probotScaleBackward()` for scaling
-- `probotDataLoader()` to assemble batched training data for Torch.
-- `probotMakeMDN()` to define the MDN architecture.
-- `probotTrainMDN()` to optimise the network.
-- `probotPredictMDN()`, `probotMarginalPostMDN()`, and `probotSamplePostMDN()` to summarise and sample from the predictive posterior.
+| Function | Role |
+|---|---|
+| `probotScaleForward()` / `probotScaleBackward()` | Standardise columns and reverse the transform |
+| `probotDataLoader()` | Assemble batched, shuffled training data for Torch |
+| `probotMakeMDN()` | Define the MDN architecture (hidden layers, components) |
+| `probotTrainMDN()` | Optimise the network via negative log-likelihood |
+| `probotPredictMDN()` | Run the trained MDN on new inputs |
+| `probotMarginalPostMDN()` | Compute per-dimension posterior means and SDs |
+| `probotSamplePostMDN()` | Draw joint samples from the predictive mixture |
+| `probotPIT()` | Check **marginal** calibration via the Probability Integral Transform |
+| `probotTARP()` | Check **joint** calibration via the Test of Accuracy with Random Points |
+
+The two calibration diagnostics are complementary: PIT catches dimension-wise miscalibration (bias, over/under-dispersion in individual outputs), while TARP catches miscalibration in the *joint* distribution (e.g. incorrect correlations or missed multimodality) that is invisible to marginal checks alone. Together they provide a comprehensive assessment of whether the MDN posterior can be trusted for downstream inference.
