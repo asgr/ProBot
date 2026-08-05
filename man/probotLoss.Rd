@@ -1,12 +1,21 @@
-\name{probotLossMDN}
+\name{probotLoss}
+\alias{probotLoss}
 \alias{probotLossMDN}
+\alias{probotLossMSE}
 \title{Compute Negative Log-Likelihood for an MDN Output}
 \description{
-Compute the Mixture Density Network loss as mean negative log-likelihood of
-targets under a Gaussian mixture.
+Various useful loss functions. Compute the Mixture Density Network (MDN) loss as mean negative log-likelihood of targets under a Gaussian mixture. Compute the Mean Standard Error (MSE) loss. Compute the Mean Absolute Error (MAE) loss. Compute the Mean Absolute Percentage Error (MAPE) loss. Compute the Huber loss.
 }
 \usage{
 probotLossMDN(output_true, output_pred, mdn_components)
+
+probotLossMSE(output_true, output_pred, mdn_components)
+
+probotLossMAE(output_true, output_pred, mdn_components)
+
+probotLossMAPE(output_true, output_pred, mdn_components)
+
+probotLossHuber(output_true, output_pred, mdn_components)
 }
 \arguments{
   \item{output_true}{Torch tensor of true targets with shape
@@ -17,7 +26,7 @@ probotLossMDN(output_true, output_pred, mdn_components)
   \item{mdn_components}{Number of Gaussian mixture components used by the model.}
 }
 \details{
-The function unpacks predicted means, log-scales, and mixture logits; applies numerically stable log-sum-exp aggregation over components; and returns the average negative log-likelihood.
+The function unpacks predicted means, log-scales, and mixture logits; applies numerically stable log-sum-exp aggregation over components; and returns the average negative log-likelihood (\code{probotLossMDN}) or MSE (\code{probotLossMSE}).
 }
 \value{
 A scalar torch tensor containing the loss value.

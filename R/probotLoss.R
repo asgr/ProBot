@@ -78,3 +78,51 @@ probotLossMSE <- function(
   # Return classic Mean Squared Error
   ((output_true - mu_mix)^2)$mean()
 }
+
+probotLossMAE <- function(
+    output_true,
+    output_pred,
+    mdn_components) {
+  if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
+  
+  p <- .probotUnpackMDN(output_pred, mdn_components)
+  weights <- nnf_softmax(p$logits, dim = 2)
+  mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
+  
+  torch::torch_abs(output_true - mu_mix)$mean()
+}
+
+probotLossMAPE <- function(output_true, output_pred, mdn_components) {
+  if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
+  
+  p <- .probotUnpackMDN(output_pred, mdn_components)
+  weights <- nnf_softmax(p$logits, dim = 2)
+  mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
+  
+  # Prevent division by zero
+  denom <- torch::torch_clamp(torch::torch_abs(output_true), min = 1e-8)
+  loss <- torch::torch_abs((output_true - mu_mix) / denom)$mean()
+  
+  return(loss * 100) # Returned as a percentage
+}
+
+probotLossHuber <- function(
+    output_true, 
+    output_pred, 
+    mdn_components, 
+    delta = 1.0) {
+  if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
+  
+  p <- .probotUnpackMDN(output_pred, mdn_components)
+  weights <- nnf_softmax(p$logits, dim = 2)
+  mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
+  
+  error <- output_true - mu_mix
+  abs_error <- torch::torch_abs(error)
+  
+  quad_part <- 0.5 * (error^2)
+  linear_part <- delta * (abs_error - 0.5 * delta)
+  loss <- torch::torch_where(abs_error <= delta, quad_part, linear_part)
+  
+  loss$mean()
+}
