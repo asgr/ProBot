@@ -190,7 +190,7 @@ post_samples <- probotSamplePostMDN(
 head(post_samples)
 ```
 
-The triangle (corner) plot below shows the pairwise marginal distributions of the nine polynomial outputs for the first test observation. The red reference lines mark the true values. Well-calibrated samples should scatter symmetrically around the truth.
+The triangle (corner) plot below shows the pairwise marginal distributions of the nine polynomial outputs for the first test observation. The blue reference points/lines mark the true values. Well-calibrated samples should scatter symmetrically around the truth.
 
 ```{r fig.width=6, fig.height=6, eval=eval_global}
 magtri(post_samples, refvals = poly_test$output[1,])
