@@ -112,7 +112,7 @@ We build an MDN with a three-layer encoder (64 → 128 → 64 hidden units) and 
 forward_model <- probotMakeMDN(
   input_dim = ncol(input_scaled),
   output_dim = ncol(output_scaled),
-  mdn_components = 1,
+  mdn_components = 5,
   hidden_dims = c(64, 128, 64)
 )()
 
@@ -123,7 +123,7 @@ forward_fit <- probotTrainMDN(
   dataloader = dataloader,
   optimizer = forward_optimizer,
   epochs = 100,
-  mdn_components = 1,
+  mdn_components = 5,
   verbose = TRUE,
   early_stop = FALSE
 )
@@ -303,9 +303,7 @@ inverse_fit <- probotTrainMDN(
   epochs = 100,
   mdn_components = 5,
   verbose = TRUE,
-  early_stop = FALSE,
-  stop_window = 5,
-  stop_delta = 1e-3
+  early_stop = FALSE
 )
 ```
 
