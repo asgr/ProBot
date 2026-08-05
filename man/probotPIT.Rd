@@ -10,6 +10,7 @@ from a Mixture Density Network (MDN).
 probotPIT(
   mdn_output,
   params,
+  n_test = 1e4,
   n_samples = 1e4,
   col_means,
   col_sds,
@@ -23,6 +24,9 @@ probotPIT(
 
   \item{params}{Numeric matrix of shape \eqn{n_\text{test} \times n_\text{params}}
     containing the true parameter values for each test observation.}
+
+  \item{n_test}{Number of PITs to compute (i.e. params[1:n_test]).
+    Defaults to \code{1e4} and cannot be more than nrow(params).}
 
   \item{n_samples}{Number of posterior samples to draw per observation.
     Defaults to \code{1e4}.}

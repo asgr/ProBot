@@ -1,6 +1,7 @@
 probotTARP <- function(
     mdn_output,
     params,
+    n_test = 1e4,
     n_samples = 1e4,
     col_means,
     col_sds,
@@ -8,7 +9,11 @@ probotTARP <- function(
     verbose = TRUE
 ){
 
-  n_test <- nrow(params)
+  if(is.null(n_test)){
+    n_test <- nrow(params)
+  }else{
+    n_test = pmin(n_test, nrow(params), na.rm=TRUE)
+  }
 
   tarp <- numeric(n_test)
 
