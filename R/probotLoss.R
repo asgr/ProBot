@@ -82,7 +82,8 @@ probotLossMSE <- function(
 probotLossMAE <- function(
     output_true,
     output_pred,
-    mdn_components) {
+    mdn_components
+) {
   if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
   
   p <- .probotUnpackMDN(output_pred, mdn_components)
@@ -92,7 +93,11 @@ probotLossMAE <- function(
   torch::torch_abs(output_true - mu_mix)$mean()
 }
 
-probotLossMAPE <- function(output_true, output_pred, mdn_components) {
+probotLossMAPE <- function(
+    output_true,
+    output_pred, 
+    mdn_components
+) {
   if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
   
   p <- .probotUnpackMDN(output_pred, mdn_components)
@@ -110,7 +115,8 @@ probotLossHuber <- function(
     output_true, 
     output_pred, 
     mdn_components, 
-    delta = 1.0) {
+    delta = 1.0
+) {
   if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
   
   p <- .probotUnpackMDN(output_pred, mdn_components)

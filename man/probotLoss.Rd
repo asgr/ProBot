@@ -2,6 +2,9 @@
 \alias{probotLoss}
 \alias{probotLossMDN}
 \alias{probotLossMSE}
+\alias{probotLossMAE}
+\alias{probotLossMAPE}
+\alias{probotLossHuber}
 \title{Compute Negative Log-Likelihood for an MDN Output}
 \description{
 Various useful loss functions. Compute the Mixture Density Network (MDN) loss as mean negative log-likelihood of targets under a Gaussian mixture. Compute the Mean Standard Error (MSE) loss. Compute the Mean Absolute Error (MAE) loss. Compute the Mean Absolute Percentage Error (MAPE) loss. Compute the Huber loss.
