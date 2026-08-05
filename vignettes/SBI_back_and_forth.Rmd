@@ -1,0 +1,584 @@
+---
+title: "ProBot SBI: Forward and Inverse Inference for a Mixture-of-Gaussians Simulator"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ProBot SBI: Forward and Inverse Inference for a Mixture-of-Gaussians Simulator}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(ProBot)
+library(torch)
+library(magicaxis)
+set.seed(42)
+torch_manual_seed(42)
+eval_global <- FALSE
+```
+
+## Overview
+
+This vignette demonstrates the full **ProBot** simulation-based inference (SBI) workflow
+on a mixture-of-Gaussians simulator — a classic test-bed for likelihood-free inference
+methods.  The simulator has five input parameters and returns two low-dimensional summary
+statistics (mean and variance of a mixture sample).  Because the summary statistics are a
+many-to-one compression of the original data, the inverse problem is genuinely ill-posed:
+many different parameter vectors can produce the same (or very similar) summaries.  This
+makes it an ideal setting to showcase the power of Mixture Density Networks (MDNs), which
+can represent a full *posterior distribution* over plausible inputs rather than a single
+point estimate.
+
+The vignette is structured as two complementary inference tasks:
+
+1. **Forward inference** — given the five simulator parameters, predict the two summary
+   statistics together with their uncertainty.
+2. **Backward (inverse) inference** — given an observed pair of summary statistics,
+   recover a posterior distribution over the five parameters.
+
+After training each MDN we validate the posterior calibration using the two diagnostics
+built into ProBot:
+
+- **PIT** (Probability Integral Transform) checks *marginal* calibration dimension by
+  dimension.
+- **TARP** (Test of Accuracy with Random Points) checks *joint* calibration across all
+  output dimensions simultaneously.
+
+### The simulator
+
+The mixture-of-Gaussians simulator draws `n_samp` samples from a two-component mixture
+and returns the empirical mean and variance of the pooled draw.  Component 1 has mean
+`alpha1` and standard deviation `beta1`; component 2 has mean `sqrt(alpha2)` and standard
+deviation `sqrt(beta2)`.  The mixing fraction is `gamma`.
+
+```{r simulator}
+sample_func <- function(alpha1, beta1, alpha2, beta2, gamma, n_samp = 1e3) {
+  n1 <- round(n_samp * gamma)
+  n2 <- n_samp - n1
+  samp <- c(
+    rnorm(n1, mean = alpha1,       sd = beta1),
+    rnorm(n2, mean = sqrt(alpha2), sd = sqrt(beta2))
+  )
+  c(mean = mean(samp), variance = var(samp))
+}
+```
+
+### Why is this hard to invert?
+
+The five-dimensional parameter space is compressed to just two summary statistics, so the
+inverse mapping is inherently degenerate.  Additionally `alpha2` and `beta2` enter the
+simulator via square roots, introducing a non-linear and non-injective relationship with
+the outputs.  A standard regression network would return a single parameter vector and
+silently throw away the multi-modal structure of the posterior; an MDN can represent the
+full distribution.
+
+---
+
+## Simulating training and test data
+
+We draw 100 000 parameter vectors uniformly from the prior and evaluate the simulator at
+each one to build the training set, and a further 10 000 for testing.
+
+```{r simulate-data, eval = eval_global}
+n_train <- 1e5
+n_test  <- 1e4
+
+prior_sample <- function(n) {
+  cbind(
+    alpha1 = runif(n,  1, 10),
+    beta1  = runif(n,  1, 10),
+    alpha2 = runif(n,  1, 10),
+    beta2  = runif(n,  1, 10),
+    gamma  = runif(n,  0,  1)
+  )
+}
+
+params_train <- prior_sample(n_train)
+params_test  <- prior_sample(n_test)
+
+stats_train <- t(apply(params_train, 1, function(p) {
+  sample_func(p["alpha1"], p["beta1"], p["alpha2"], p["beta2"], p["gamma"])
+}))
+
+stats_test <- t(apply(params_test, 1, function(p) {
+  sample_func(p["alpha1"], p["beta1"], p["alpha2"], p["beta2"], p["gamma"])
+}))
+
+colnames(stats_train) <- colnames(stats_test) <- c("mean", "variance")
+```
+
+It is instructive to look at the joint distribution of all seven quantities (five
+parameters plus two statistics) before training:
+
+```{r magtri-all, fig.width = 7, fig.height = 7, eval = eval_global}
+magtri(cbind(params_train[1:5000, ], stats_train[1:5000, ]))
+```
+
+The triangle plot already hints at the compressed nature of the mapping: the summary
+statistics have a smooth, low-dimensional relationship with the parameters, but many
+parameter combinations are consistent with similar statistic values.
+
+---
+
+## Example 1: forward inference (parameters → summary statistics)
+
+### Scaling and data loading
+
+Neural networks train best when all inputs and outputs are on comparable scales.
+`probotScaleForward()` standardises each column to zero mean and unit variance and stores
+the centering and scale parameters as attributes so that the same transform can be applied
+to new data or reversed on predictions.
+
+```{r forward-prep, eval = eval_global}
+params_scaled <- probotScaleForward(params_train)
+stats_scaled  <- probotScaleForward(stats_train)
+
+forward_loader <- probotDataLoader(
+  input  = params_scaled,
+  output = stats_scaled,
+  batch  = 1024
+)
+```
+
+### Building and training the forward MDN
+
+We use a three-layer encoder (64 → 128 → 64 hidden units) with five mixture components.
+Five components give the network enough flexibility to represent skewed or multi-modal
+predictive distributions without being unnecessarily large.
+
+```{r forward-train, eval = eval_global}
+forward_model <- probotMakeMDN(
+  input_dim      = ncol(params_scaled),
+  output_dim     = ncol(stats_scaled),
+  mdn_components = 5,
+  hidden_dims    = c(64, 128, 64)
+)()
+
+forward_optimizer <- optim_adam(forward_model$parameters, lr = 0.01)
+
+forward_fit <- probotTrainMDN(
+  model          = forward_model,
+  dataloader     = forward_loader,
+  optimizer      = forward_optimizer,
+  epochs         = 100,
+  mdn_components = 5,
+  lambda         = 0.05,
+  verbose        = TRUE,
+  early_stop     = FALSE,
+  stop_window    = 5,
+  stop_delta     = 1e-3
+)
+```
+
+### Inspecting the training history
+
+```{r forward-history, eval = eval_global}
+head(forward_fit$history)
+tail(forward_fit$history)
+```
+
+A monotonically decreasing loss that flattens toward the final epochs is healthy.
+Persistent upward steps after an initial descent would indicate overfitting; an early
+plateau would suggest a learning rate that is too low.
+
+### Predicting on the test set
+
+We apply the *training* scaling to the test inputs using the stored attributes — using
+different scaling at prediction time is a common source of subtle errors.
+
+```{r forward-predict, eval = eval_global}
+params_test_scaled <- probotScaleForward(
+  params_test,
+  col_means = attr(params_scaled, "col_scale")$col_means,
+  col_sds   = attr(params_scaled, "col_scale")$col_sds
+)
+
+forward_pred <- probotPredictMDN(
+  input          = params_test_scaled,
+  model          = forward_fit$model,
+  mdn_components = 5
+)
+
+forward_summary <- probotMarginalPostMDN(
+  mdn_output = forward_pred,
+  col_means  = attr(stats_scaled, "col_scale")$col_means,
+  col_sds    = attr(stats_scaled, "col_scale")$col_sds,
+  col_names  = colnames(stats_scaled)
+)
+
+round(forward_summary$post_mean[1:5, ], 4)
+```
+
+`probotMarginalPostMDN()` collapses the full mixture to per-dimension marginal summaries
+(posterior mean and standard deviation) back-transformed to the original scale.
+
+### Overall accuracy
+
+```{r forward-mae, eval = eval_global}
+cat("Forward MAE (mean)    :",
+    mean(abs(forward_summary$post_mean[, "mean"]     - stats_test[, "mean"])),     "\n")
+cat("Forward MAE (variance):",
+    mean(abs(forward_summary$post_mean[, "variance"] - stats_test[, "variance"])), "\n")
+```
+
+### Truth vs. predicted scatter plots
+
+For each output dimension we plot the posterior mean against the true value, with ±1
+posterior standard deviation as error bars.  A tight, symmetric scatter about the
+diagonal confirms good forward prediction.
+
+```{r forward-scatter, eval = eval_global}
+for (j in seq_len(ncol(stats_test))) {
+  magplot(
+    stats_test[, j], forward_summary$post_mean[, j],
+    xlab = paste0("True ",  colnames(stats_test)[j]),
+    ylab = paste0("Predicted ", colnames(stats_test)[j]),
+    pch  = "."
+  )
+  magerr(
+    stats_test[, j], forward_summary$post_mean[, j],
+    ylo = forward_summary$post_sd[, j],
+    col = hsv(v = 0, alpha = 0.05)
+  )
+  abline(0, 1, col = "red", lty = 2)
+}
+```
+
+### Posterior samples for one observation
+
+Rather than relying only on marginal summaries we can draw samples from the joint
+predictive distribution for a single test observation.  This is the most faithful
+representation of what the MDN has learned.
+
+```{r forward-samples, eval = eval_global}
+fwd_post_samples <- probotSamplePostMDN(
+  mdn_output = forward_pred,
+  index      = 1,
+  n_samples  = 2000,
+  col_means  = attr(stats_scaled, "col_scale")$col_means,
+  col_sds    = attr(stats_scaled, "col_scale")$col_sds,
+  col_names  = colnames(stats_train)
+)
+
+head(fwd_post_samples)
+```
+
+```{r forward-corner, fig.width = 5, fig.height = 5, eval = eval_global}
+magtri(fwd_post_samples, refvals = stats_test[1, ])
+```
+
+The blue reference lines mark the true summary statistics for observation 1.
+Well-calibrated samples should scatter symmetrically around the truth.
+
+### PIT diagnostic: marginal calibration
+
+```{r forward-pit, eval = eval_global}
+PIT_forward <- probotPIT(
+  forward_pred,
+  params    = stats_test,
+  col_means = attr(stats_scaled, "col_scale")$col_means,
+  col_sds   = attr(stats_scaled, "col_scale")$col_sds,
+  col_names = colnames(stats_scaled)
+)
+```
+
+```{r forward-pit-plot, fig.width = 5, fig.height = 5, eval = eval_global}
+magtri(PIT_forward)
+```
+
+Uniform marginal histograms on the diagonal confirm that each output dimension is
+individually well calibrated.  A U-shaped histogram would indicate a posterior that is
+too narrow (the truth falls in the tails too often); a Λ-shaped histogram would indicate
+a posterior that is too wide.
+
+### TARP diagnostic: joint calibration
+
+```{r forward-tarp, eval = eval_global}
+TARP_forward <- probotTARP(
+  forward_pred,
+  params    = stats_test,
+  col_means = attr(stats_scaled, "col_scale")$col_means,
+  col_sds   = attr(stats_scaled, "col_scale")$col_sds,
+  col_names = colnames(stats_scaled)
+)
+```
+
+```{r forward-tarp-plot, fig.width = 6, fig.height = 4, eval = eval_global}
+maghist(
+  TARP_forward, breaks = 20,
+  xlab = "TARP coverage", ylab = "Count",
+  main = "Forward model: TARP diagnostic"
+)
+abline(h = length(TARP_forward) / 20, lty = 2, col = "red")
+
+ks.test(TARP_forward, "punif")
+```
+
+A flat histogram and a non-significant Kolmogorov–Smirnov p-value indicate a well
+calibrated joint posterior.  Excess mass near 0.5 would suggest the posterior is too
+wide; excess mass near 0 and 1 would suggest it is too narrow.
+
+---
+
+## Example 2: inverse (backward) inference (summary statistics → parameters)
+
+Now we flip the problem: given the two observed summary statistics, we want to recover a
+posterior distribution over the five simulator parameters.
+
+This is the heart of simulation-based inference (SBI).  The mapping from observations to
+parameters is many-to-one in the forward direction, so the inverse is many-to-many — the
+same pair (mean, variance) is consistent with a large family of parameter vectors.  An
+MDN can represent this multimodal, high-dimensional posterior with a single forward pass,
+whereas MCMC or nested sampling would require thousands of simulator evaluations for each
+new observation.
+
+### Reusing the scaled data (roles swapped)
+
+We reuse the same scaled matrices from the forward example — we simply swap which one is
+the input and which is the output.
+
+```{r inverse-prep, eval = eval_global}
+inverse_loader <- probotDataLoader(
+  input  = stats_scaled,   # observations as inputs
+  output = params_scaled,  # parameters as targets
+  batch  = 1024
+)
+```
+
+### Building and training the inverse MDN
+
+The architecture mirrors the forward MDN, but now the input dimension equals the number
+of summary statistics (2) and the output dimension equals the number of parameters (5).
+Five mixture components allow the network to represent a genuinely multimodal posterior
+over parameters — e.g. situations where two distinct parameter configurations produce
+indistinguishable summary statistics.
+
+```{r inverse-train, eval = eval_global}
+inverse_model <- probotMakeMDN(
+  input_dim      = ncol(stats_scaled),
+  output_dim     = ncol(params_scaled),
+  mdn_components = 5,
+  hidden_dims    = c(64, 128, 64)
+)()
+
+inverse_optimizer <- optim_adam(inverse_model$parameters, lr = 0.01)
+
+inverse_fit <- probotTrainMDN(
+  model          = inverse_model,
+  dataloader     = inverse_loader,
+  optimizer      = inverse_optimizer,
+  epochs         = 100,
+  mdn_components = 5,
+  lambda         = 0.05,
+  verbose        = TRUE,
+  early_stop     = FALSE,
+  stop_window    = 5,
+  stop_delta     = 1e-3
+)
+```
+
+The only change relative to the forward MDN is the swap of `input` / `output` in
+`probotDataLoader()` and the matching swap of `input_dim` / `output_dim` in
+`probotMakeMDN()`.  The training loop, diagnostics, and prediction API are identical.
+
+### Training history
+
+```{r inverse-history, eval = eval_global}
+head(inverse_fit$history)
+tail(inverse_fit$history)
+```
+
+The inverse problem is strictly harder than the forward one (we are recovering five
+parameters from only two summaries), so we expect a higher final loss reflecting
+irreducible posterior uncertainty.
+
+### Predicting the posterior over parameters
+
+```{r inverse-predict, eval = eval_global}
+stats_test_scaled <- probotScaleForward(
+  stats_test,
+  col_means = attr(stats_scaled, "col_scale")$col_means,
+  col_sds   = attr(stats_scaled, "col_scale")$col_sds
+)
+
+inverse_pred <- probotPredictMDN(
+  input          = stats_test_scaled,
+  model          = inverse_fit$model,
+  mdn_components = 5
+)
+
+inverse_summary <- probotMarginalPostMDN(
+  mdn_output = inverse_pred,
+  col_means  = attr(params_scaled, "col_scale")$col_means,
+  col_sds    = attr(params_scaled, "col_scale")$col_sds,
+  col_names  = colnames(params_train)
+)
+
+head(round(inverse_summary$post_mean, 3))
+head(round(inverse_summary$post_sd,   3))
+```
+
+The posterior standard deviations (`post_sd`) quantify how much information the two
+summary statistics carry about each parameter.  Parameters that enter the simulator
+through the same summary statistic will tend to have larger posterior uncertainty and
+stronger posterior correlations.
+
+### Truth vs. predicted parameter scatter plots
+
+```{r inverse-scatter, eval = eval_global}
+for (j in seq_len(ncol(params_test))) {
+  magplot(
+    params_test[, j], inverse_summary$post_mean[, j],
+    xlab = paste0("True ",      colnames(params_test)[j]),
+    ylab = paste0("Predicted ", colnames(params_test)[j]),
+    pch  = "."
+  )
+  magerr(
+    params_test[, j], inverse_summary$post_mean[, j],
+    ylo = inverse_summary$post_sd[, j],
+    col = hsv(v = 0, alpha = 0.05)
+  )
+  abline(0, 1, col = "red", lty = 2)
+}
+```
+
+Because the summary statistics compress five degrees of freedom into two, some parameters
+will be poorly constrained by the data — those scatter plots will show wide, diffuse
+clouds rather than tight diagonals.  This is expected: the MDN faithfully represents the
+posterior *including* its broad uncertainty.
+
+### Posterior samples and corner plot for one observation
+
+The corner plot provides the richest view of the posterior — it shows both marginal
+distributions (diagonal) and pairwise correlations (off-diagonal panels).  Multi-modal or
+banana-shaped distributions, which marginal summaries would miss entirely, are visible
+here.
+
+```{r inverse-samples, eval = eval_global}
+inv_post_samples <- probotSamplePostMDN(
+  mdn_output = inverse_pred,
+  index      = 1,
+  n_samples  = 2000,
+  col_means  = attr(params_scaled, "col_scale")$col_means,
+  col_sds    = attr(params_scaled, "col_scale")$col_sds,
+  col_names  = colnames(params_train)
+)
+
+head(inv_post_samples)
+```
+
+```{r inverse-corner, fig.width = 7, fig.height = 7, eval = eval_global}
+magtri(inv_post_samples, refvals = params_test[1, ])
+```
+
+The blue reference lines mark the true generating parameters for observation 1.  Broad
+marginal histograms with little mass near the truth are expected for parameters that are
+only weakly constrained by the two summary statistics.
+
+### Numerical summary for one observation
+
+```{r inverse-comparison, eval = eval_global}
+comparison <- data.frame(
+  parameter = colnames(params_test),
+  truth     = as.numeric(params_test[1, ]),
+  estimate  = as.numeric(inverse_summary$post_mean[1, ]),
+  sd        = as.numeric(inverse_summary$post_sd[1,   ])
+)
+print(comparison, digits = 3)
+```
+
+Parameters whose posterior standard deviation is comparable to or larger than the prior
+range (e.g. `beta2` if both `alpha2` and `beta2` influence the variance similarly) are
+genuinely unidentifiable from the two chosen summaries — the MDN posterior will
+approximately reproduce the prior for those dimensions.
+
+### PIT diagnostic: marginal calibration of the inverse posterior
+
+```{r inverse-pit, eval = eval_global}
+PIT_inverse <- probotPIT(
+  inverse_pred,
+  params    = params_test,
+  col_means = attr(params_scaled, "col_scale")$col_means,
+  col_sds   = attr(params_scaled, "col_scale")$col_sds,
+  col_names = colnames(params_train)
+)
+```
+
+```{r inverse-pit-plot, fig.width = 7, fig.height = 7, eval = eval_global}
+magtri(PIT_inverse)
+```
+
+In the inverse problem the PIT matrix now has five columns (one per parameter).  Uniform
+histograms confirm that the marginal posterior for each individual parameter is
+well calibrated even though those marginals may be very broad.
+
+### TARP diagnostic: joint calibration of the inverse posterior
+
+```{r inverse-tarp, eval = eval_global}
+TARP_inverse <- probotTARP(
+  inverse_pred,
+  params    = params_test,
+  col_means = attr(params_scaled, "col_scale")$col_means,
+  col_sds   = attr(params_scaled, "col_scale")$col_sds,
+  col_names = colnames(params_train)
+)
+```
+
+```{r inverse-tarp-plot, fig.width = 6, fig.height = 4, eval = eval_global}
+maghist(
+  TARP_inverse, breaks = 20,
+  xlab = "TARP coverage", ylab = "Count",
+  main = "Inverse model: TARP diagnostic"
+)
+abline(h = length(TARP_inverse) / 20, lty = 2, col = "red")
+
+ks.test(TARP_inverse, "punif")
+```
+
+A flat TARP histogram and a non-significant KS p-value provide strong evidence that the
+joint posterior over all five parameters is well calibrated — a demanding standard that
+simultaneously validates the predicted means, uncertainties, and inter-parameter
+correlations.  Because the inverse problem is degenerate (five parameters from two
+summaries) the joint posterior will be broad, but it should still be *calibrated* — i.e.
+the true parameter vector should behave like a random draw from the predicted posterior.
+
+---
+
+## Comparison: forward vs. inverse uncertainty
+
+One of the key insights from running both directions is the asymmetry of uncertainty:
+
+- **Forward** (parameters → statistics): the mapping is a many-to-one compression, but
+  for any fixed parameter vector the simulator output is nearly deterministic (dominated
+  by Monte Carlo noise from a sample of 1000).  Posterior standard deviations are small.
+
+- **Backward** (statistics → parameters): the mapping is genuinely ill-posed.  The
+  posterior standard deviations for poorly identified parameters will be large — sometimes
+  comparable to the full prior range.  The MDN represents this honestly rather than
+  returning an overconfident point estimate.
+
+This contrast illustrates why SBI and MDNs are so valuable: they provide calibrated
+uncertainty estimates that respect the fundamental limits of what can be inferred from
+low-dimensional summaries.
+
+---
+
+## Summary
+
+| Function | Role |
+|---|---|
+| `probotScaleForward()` | Standardise columns to zero mean / unit variance, store scale attributes |
+| `probotDataLoader()` | Assemble batched, shuffled training data for torch |
+| `probotMakeMDN()` | Define the MDN architecture (hidden layers, mixture components) |
+| `probotTrainMDN()` | Optimise the network by minimising negative log-likelihood |
+| `probotPredictMDN()` | Run the trained MDN on new inputs to obtain mixture parameters |
+| `probotMarginalPostMDN()` | Compute per-dimension posterior means and standard deviations |
+| `probotSamplePostMDN()` | Draw joint samples from the predictive mixture distribution |
+| `probotPIT()` | Check **marginal** calibration via the Probability Integral Transform |
+| `probotTARP()` | Check **joint** calibration via the Test of Accuracy with Random Points |
+
+The workflow is identical for the forward and inverse problems — only the assignment of
+"input" and "output" changes.  PIT and TARP together provide a rigorous, two-level
+calibration check: PIT catches dimension-wise bias or dispersion errors, while TARP
+catches miscalibration in the joint distribution that is invisible to marginal diagnostics
+alone.
