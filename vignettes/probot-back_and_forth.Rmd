@@ -1,5 +1,5 @@
 ---
-title: "ProBot vignette"
+title: "ProBot: Back and Forth"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{ProBot vignette}
@@ -45,7 +45,7 @@ After training we want to verify that the uncertainty reported by the MDN is *we
 
 We define a generative function that turns two input parameters (`u`, `v`) into three polynomial coefficients (`a0`, `a1`, `a2`). Those coefficients are then evaluated on a fixed grid of nine equally spaced points in [−1, 1], giving a nine-dimensional output vector. The nonlinear dependence on `u` (via `sin` and squaring) means the forward mapping is not trivially invertible, which is precisely the kind of problem where MDNs excel.
 
-```{r, eval=eval_global}
+```{r eval=eval_global}
 make_polynomial_output <- function(theta) {
   a0 <- 0.3 + 0.8 * theta[, 1] - 0.4 * theta[, 2]
   a1 <- -1.2 + 0.5 * theta[, 1]^2 + 0.7 * theta[, 2]
@@ -78,6 +78,14 @@ theta_test <- cbind(
 poly_train <- make_polynomial_output(theta_train)
 poly_test <- make_polynomial_output(theta_test)
 ```
+
+It is worth seeing how directly (or not) the various input parameters predict the outputs:
+
+```{r fig.width=6, fig.height=6, eval=eval_global}
+magtri(cbind(theta_train, poly_train$output))
+```
+
+So the question then becomes how well can our inference network (which in this context can be thought of like an emulator with errors) predict x1-9 given *u* and *v* and vica versa? Well, spoiling the punchline the answer is 'remarkably well' but let's go through how we get there in small steps.
 
 ### Scaling and data loading
 
