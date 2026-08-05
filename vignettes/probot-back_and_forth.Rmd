@@ -2,7 +2,7 @@
 title: "ProBot: Back and Forth"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{ProBot vignette}
+  %\VignetteIndexEntry{ProBot: Back and Forth}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -14,7 +14,7 @@ library(torch)
 library(magicaxis)
 set.seed(1)
 torch_manual_seed(1)
-eval_global = TRUE
+eval_global = FALSE
 ```
 
 ## Overview
@@ -106,13 +106,13 @@ dataloader <- probotDataLoader(
 
 ### Building and training the forward MDN
 
-We build an MDN with a three-layer encoder (64 → 128 → 64 hidden units) and five Gaussian mixture components. Five components give the network enough flexibility to represent multimodal or skewed predictive distributions without being unnecessarily large.
+We build an MDN with a three-layer encoder (64 → 128 → 64 hidden units) and three Gaussian mixture components. Five components give the network enough flexibility to represent multimodal or skewed predictive distributions without being unnecessarily large.
 
 ```{r forward-train, eval=eval_global}
 forward_model <- probotMakeMDN(
   input_dim = ncol(input_scaled),
   output_dim = ncol(output_scaled),
-  mdn_components = 5,
+  mdn_components = 3,
   hidden_dims = c(64, 128, 64)
 )()
 
@@ -123,9 +123,10 @@ forward_fit <- probotTrainMDN(
   dataloader = dataloader,
   optimizer = forward_optimizer,
   epochs = 100,
-  mdn_components = 5,
+  mdn_components = 3,
   verbose = TRUE,
-  early_stop = FALSE
+  early_stop = FALSE,
+  lambda = 0.1
 )
 ```
 
@@ -157,7 +158,7 @@ theta_test_scaled <- probotScaleForward(
 forward_pred <- probotPredictMDN(
   input = theta_test_scaled,
   model = forward_fit$model,
-  mdn_components = 1
+  mdn_components = 3
 )
 
 forward_summary <- probotMarginalPostMDN(

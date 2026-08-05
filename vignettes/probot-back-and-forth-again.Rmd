@@ -2,7 +2,7 @@
 title: "ProBot: Back and Forth Again"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{ProBot SBI: Forward and Inverse Inference for a Mixture-of-Gaussians Simulator}
+  %\VignetteIndexEntry{ProBot: Back and Forth Again}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -14,7 +14,7 @@ library(torch)
 library(magicaxis)
 set.seed(42)
 torch_manual_seed(42)
-eval_global <- TRUE
+eval_global <- FALSE
 ```
 
 ## Overview
