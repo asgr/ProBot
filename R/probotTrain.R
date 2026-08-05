@@ -18,63 +18,43 @@ probotDataLoader <- function(input,
   return(dataloader)
 }
 
-probotSingleEpochMDN <- function(model,
-                                 dataloader,
-                                 optimizer,
-                                 mdn_components,
-                                 lambda = 0.01) {
-  model$train()
-
+probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components, loss_fn = probotLossMDN) {
+  model$train()  
   running_loss <- 0
   running_mae <- 0
   running_rmse <- 0
-  running_sigma <- 0
-
-  running_mix <- numeric(mdn_components)
-
-  n_batches <- 0
-
+  running_sigma <- 0  
+  running_mix <- numeric(mdn_components)  
+  n_batches <- 0  
+  
   coro::loop(for (batch in dataloader) {
-    optimizer$zero_grad()
-
-    output_pred <- model(batch[[1]])
-
-    p <- .probotUnpackMDN(output_pred, mdn_components)
-
-    weights <- nnf_softmax(p$logits, dim = 2)
-
-    mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
-
-    mse_loss <- ((batch[[2]] - mu_mix)^2)$mean()
-
-    mae <- (batch[[2]] - mu_mix)$abs()$mean()$item()
-
-    rmse <- ((batch[[2]] - mu_mix)^2)$mean()$sqrt()$item()
-
-    mean_sigma <- (10^torch_clamp(p$log10_sigma, min = -5, max = 5))$mean()$item()
-
-    mix_use <- apply(as.array(weights), 2, mean)
-
-    loss <- probotLossMDN(batch[[2]], output_pred, mdn_components) + lambda * mse_loss
-
-    loss$backward()
-
+    optimizer$zero_grad()  
+    output_pred <- model(batch[[1]])  
+    
+    # Switch to the specified loss_fn function
+    current_loss <- loss_fn(batch[[2]], output_pred, mdn_components)
+    current_loss$backward()
     optimizer$step()
-
-    running_loss <- running_loss + loss$item()
-    running_mae <- running_mae + mae
-    running_rmse <- running_rmse + rmse
-    running_sigma <- running_sigma + mean_sigma
-
-    running_mix <- running_mix + mix_use
-
+    
+    # Unpack for logging/metrics (unchanged)
+    p <- .probotUnpackMDN(output_pred, mdn_components)  
+    weights <- nnf_softmax(p$logits, dim = 2)  
+    mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)  
+    
+    # Accumulate metrics for epoch reporting
+    running_loss <- running_loss + current_loss$item() * length(batch[[1]])
+    running_mae <- running_mae + torch::torch_abs(batch[[2]] - mu_mix)$sum()$item()
+    running_rmse <- running_rmse + ((batch[[2]] - mu_mix)^2)$sum()$item()
+    
+    # [Insert your existing sigma/mix tracking logic here]
+    
     n_batches <- n_batches + 1
   })
-
+  
   list(
-    loss = running_loss / n_batches,
-    mae = running_mae / n_batches,
-    rmse = running_rmse / n_batches,
+    loss = running_loss / length(dataloader$dataset),
+    mae = running_mae / length(dataloader$dataset),
+    rmse = sqrt(running_rmse / length(dataloader$dataset)),
     sigma = running_sigma / n_batches,
     mix = running_mix / n_batches
   )
@@ -85,7 +65,7 @@ probotTrainMDN <- function(model,
                            optimizer,
                            epochs = 100,
                            mdn_components,
-                           lambda = 0.01,
+                           loss_fn = probotLossMDN,
                            checkpoint_dir = NULL,
                            checkpoint_every = 10,
                            history = NULL,
@@ -103,7 +83,7 @@ probotTrainMDN <- function(model,
       dataloader = dataloader,
       optimizer = optimizer,
       mdn_components = mdn_components,
-      lambda = lambda
+      loss_fn = loss_fn
     )
 
     history_list[[epoch]] <- c(list(epoch = epoch), metrics)

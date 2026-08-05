@@ -124,7 +124,6 @@ forward_fit <- probotTrainMDN(
   optimizer = forward_optimizer,
   epochs = 100,
   mdn_components = 5,
-  lambda = 0.05,
   verbose = TRUE,
   early_stop = FALSE,
   stop_window = 5,
@@ -132,7 +131,7 @@ forward_fit <- probotTrainMDN(
 )
 ```
 
-The `lambda` parameter is an L2 regularisation weight applied to the network parameters to discourage overfitting. `early_stop = FALSE` runs for the full 100 epochs here; in practice you would set `early_stop = TRUE` and tune `stop_window` and `stop_delta` so that training halts automatically once the loss has plateaued.
+`early_stop = FALSE` runs for the full 100 epochs here; in practice you would set `early_stop = TRUE` and tune `stop_window` and `stop_delta` so that training halts automatically once the loss has plateaued.
 
 ### Inspecting the training history
 
@@ -143,7 +142,7 @@ head(forward_fit$history)
 tail(forward_fit$history)
 ```
 
-A monotonically decreasing loss that flattens toward the end of training is healthy. If the loss stops decreasing early, try a lower learning rate or more epochs. If it decreases but then increases (overfitting), reduce the network size, increase `lambda`, or enable early stopping.
+A monotonically decreasing loss that flattens toward the end of training is healthy. If the loss stops decreasing early, try a lower learning rate or more epochs. If it decreases but then increases (overfitting), reduce the network size or enable early stopping. Possibly use a different loss function.
 
 ### Predicting on the test set
 
@@ -305,7 +304,6 @@ inverse_fit <- probotTrainMDN(
   optimizer = inverse_optimizer,
   epochs = 100,
   mdn_components = 5,
-  lambda = 0.05,
   verbose = TRUE,
   early_stop = FALSE,
   stop_window = 5,

@@ -8,11 +8,12 @@ early stopping and checkpoint saving.
 }
 \usage{
 probotSingleEpochMDN(model, dataloader, optimizer, mdn_components,
-  lambda = 0.01)
+  loss_fn = probotLossMDN)
 
-probotTrainMDN(model, dataloader, optimizer, epochs = 100, mdn_components,
-  lambda = 0.01, checkpoint_dir = NULL, checkpoint_every = 10, history = NULL,
-  verbose = TRUE, early_stop = TRUE, stop_window = 20, stop_delta = 1e-2)
+probotTrainMDN(model, dataloader, optimizer, epochs = 100,    
+  mdn_components, loss_fn = probotLossMDN, checkpoint_dir = NULL,
+  checkpoint_every = 10, history = NULL, verbose = TRUE,
+  early_stop = TRUE, stop_window = 20, stop_delta = 1e-2)
 }
 \arguments{
   \item{model}{Instantiated torch module returned by \code{probotMakeMDN(... )()}.}
@@ -23,7 +24,7 @@ probotTrainMDN(model, dataloader, optimizer, epochs = 100, mdn_components,
 
   \item{mdn_components}{Number of Gaussian mixture components in the model.}
 
-  \item{lambda}{Weight for auxiliary MSE regularization term.}
+  \item{loss_fn}{Loss function to use for optimisation.}
 
   \item{epochs}{Maximum number of epochs for \code{probotTrainMDN()}.}
 
@@ -78,8 +79,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
     model = model,
     dataloader = loader,
     optimizer = opt,
-    mdn_components = 2,
-    lambda = 0.01
+    mdn_components = 2
   )
 
   metrics$loss
