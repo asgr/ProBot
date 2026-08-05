@@ -1,5 +1,5 @@
 ---
-title: "ProBot SBI: Forward and Inverse Inference for a Mixture-of-Gaussians Simulator"
+title: "ProBot: Back and Forth Again"
 output: rmarkdown::html_vignette
 vignette: >
   %\VignetteIndexEntry{ProBot SBI: Forward and Inverse Inference for a Mixture-of-Gaussians Simulator}
@@ -162,7 +162,6 @@ forward_fit <- probotTrainMDN(
   optimizer      = forward_optimizer,
   epochs         = 100,
   mdn_components = 5,
-  lambda         = 0.05,
   verbose        = TRUE,
   early_stop     = FALSE,
   stop_window    = 5,
@@ -369,7 +368,6 @@ inverse_fit <- probotTrainMDN(
   optimizer      = inverse_optimizer,
   epochs         = 100,
   mdn_components = 5,
-  lambda         = 0.05,
   verbose        = TRUE,
   early_stop     = FALSE,
   stop_window    = 5,
