@@ -2,3 +2,6 @@ exportPattern("^[[:alpha:]]+")
 
 import("torch")
 import("collapse")
+
+importFrom("stats", "rnorm", "sd")
+importFrom("utils", "tail")

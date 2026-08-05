@@ -21,7 +21,7 @@ probotTARP <- function(
 
     samples <- probotSamplePostMDN(
       mdn_output,
-      galaxy_index = i,
+      index = i,
       n_samples = n_samples,
       col_means = col_means,
       col_sds = col_sds,

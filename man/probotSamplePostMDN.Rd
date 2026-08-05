@@ -9,7 +9,7 @@ means and standard deviations.
 \usage{
 probotSamplePostMDN(
   mdn_output,
-  galaxy_index = 1,
+  index = 1,
   n_samples = 5000,
   col_means,
   col_sds,
@@ -21,7 +21,7 @@ probotMarginalPostMDN(mdn_output, col_means, col_sds, col_names = NULL)
 \arguments{
   \item{mdn_output}{List returned by \code{probotPredictMDN()}.}
 
-  \item{galaxy_index}{Row index to sample from in \code{mdn_output}.}
+  \item{index}{Row index to sample from in \code{mdn_output}.}
 
   \item{n_samples}{Number of posterior samples to generate.}
 
@@ -57,11 +57,11 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
   x <- matrix(rnorm(8), ncol = 2)
-  pred <- probotPredictMDN(x, model, n_components = 2)
+  pred <- probotPredictMDN(x, model, mdn_components = 2)
 
   draws <- probotSamplePostMDN(
     mdn_output = pred,
-    galaxy_index = 1,
+    index = 1,
     n_samples = 20,
     col_means = 0,
     col_sds = 1,
