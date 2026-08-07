@@ -61,13 +61,13 @@ probotLoadModel <- function(
     filename,
     model_skeleton = NULL,
     load_optimizer = FALSE,
-    device = NULL
+    device = "cpu"
 ) {
 
   checkpoint <- torch_load(
     filename,
-    map_location = if (!is.null(device)) torch::torch_device(device) else NULL
-   )
+    device = device
+  )
 
   # Check for older format (no nested structure)
   if ("model" %in% names(checkpoint)) {
@@ -101,11 +101,11 @@ probotLoadModel <- function(
         "reconstruction from saved metadata.")
 }
 
-probotLoad <- function(filename, load_optimizer = FALSE, device = NULL) {
+probotLoad <- function(filename, load_optimizer = FALSE, device = "cpu") {
 
   checkpoint <- torch_load(
     filename,
-    map_location = if (!is.null(device)) torch::torch_device(device) else NULL
+    device = device
    )
 
   meta <- checkpoint$metadata

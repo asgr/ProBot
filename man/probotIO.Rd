@@ -135,6 +135,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   restored <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
   result2 <- probotLoadModel(path, model_skeleton = restored)
 
-  file.exists(path)
+  # Are they the same? (should be TRUE)
+  all.equal(result, result2)
 }
 }
