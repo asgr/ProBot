@@ -14,6 +14,22 @@ probotSave <- function(
        ...
 ) {
 
+  required_metadata <- list(
+    mdn_components = mdn_components,
+    input_dim = input_dim,
+    output_dim = output_dim
+  )
+  missing_metadata <- names(required_metadata)[vapply(required_metadata, is.null, logical(1))]
+  if (length(missing_metadata) > 0) {
+    warning(
+      "Checkpoint metadata missing ",
+      paste(missing_metadata, collapse = ", "),
+      ". probotLoad() will not be able to auto-reconstruct this model; ",
+      "use probotLoadModel() with an explicit model_skeleton instead.",
+      call. = FALSE
+    )
+  }
+
   metadata <- list(
     version = "1.0",
     package_version = as.character(utils::packageVersion("ProBot")),
@@ -58,7 +74,11 @@ probotLoadModel <- function(
     warning("Loading from older checkpoint format (pre v1.0)")
     if (!is.null(model_skeleton)) {
       model_skeleton$load_state_dict(checkpoint$model)
-      return(model_skeleton)
+      return(list(
+        model = model_skeleton,
+        optimizer = if (load_optimizer) checkpoint$optimizer else NULL,
+        metadata = NULL
+      ))
     }
     stop("Old format checkpoint requires an explicit model_skeleton")
    }
@@ -96,7 +116,7 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL) {
 
    # Check required fields for auto-reconstruction
   required <- c("mdn_components", "input_dim", "output_dim")
-  missing_fields <- required[sapply(meta, is.null)]
+  missing_fields <- required[vapply(required, function(field) is.null(meta[[field]]), logical(1))]
   if (length(missing_fields) > 0) {
     stop("Cannot reconstruct model: metadata missing ", paste(missing_fields, collapse = ", "),
          ". Save with probotSave() specifying these parameters, or use ",
@@ -106,13 +126,16 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL) {
   # Reconstruct activation function from name
   activation <- nnf_relu
   if (!is.null(meta$activation)) {
-    switch(meta$activation,
-      relu = ,
-        activation <- nnf_relu,
-      silu = activation <- nnf_silu,
-      gelu = activation <- nnf_gelu,
-      warning("Unrecognized activation '", meta$activation, "', falling back to relu")
-     )
+    activation <- switch(
+      meta$activation,
+      relu = nnf_relu,
+      silu = nnf_silu,
+      gelu = nnf_gelu,
+      {
+        warning("Unrecognized activation '", meta$activation, "', falling back to relu")
+        nnf_relu
+      }
+    )
    }
 
   # Reconstruct model architecture and load weights

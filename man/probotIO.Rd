@@ -100,7 +100,7 @@ tag (\code{"1.0"}) to detect incompatible formats on load.
 \value{
   \itemize{
     \item \code{probotSave()}: The file path, returned invisibly.
-    \item \code{probootLoadModel()}: A list with elements \code{model},
+    \item \code{probotLoadModel()}: A list with elements \code{model},
       \code{optimizer}, and \code{metadata}.
     \item \code{probotLoad()}: Same as \code{probotLoadModel()}, but with the
       model fully reconstructed from stored metadata.
