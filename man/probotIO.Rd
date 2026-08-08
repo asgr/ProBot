@@ -100,7 +100,7 @@ tag (\code{"1.0"}) to detect incompatible formats on load.
 \value{
   \itemize{
     \item \code{probotSave()}: The file path, returned invisibly.
-    \item \code{probootLoadModel()}: A list with elements \code{model},
+    \item \code{probotLoadModel()}: A list with elements \code{model},
       \code{optimizer}, and \code{metadata}.
     \item \code{probotLoad()}: Same as \code{probotLoadModel()}, but with the
       model fully reconstructed from stored metadata.
@@ -135,6 +135,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   restored <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
   result2 <- probotLoadModel(path, model_skeleton = restored)
 
-  file.exists(path)
+  # Are they the same? (should be TRUE)
+  all.equal(result, result2)
 }
 }
