@@ -1,30 +1,47 @@
 \name{probotPredictMDN}
 \alias{probotPredictMDN}
-\title{Run an MDN Model and Unpack Mixture Parameters}
+\title{Generate MDN Predictions from a Trained Model}
 \description{
-Run a trained Mixture Density Network on new input data and return unpacked
-mixture parameters.
+Pass input features through a trained MDN and unpack the raw network output into
+separate \code{logits}, \code{mu}, and \code{log10_sigma} tensors for downstream
+sampling or evaluation.
 }
 \usage{
-probotPredictMDN(input, model, mdn_components)
+probotPredictMDN(input, model, mdn_components, device = NULL)
 }
 \arguments{
-  \item{input}{Numeric matrix of predictors with rows as observations. In this context \option{input} needs to be scaled (e.g. with \code{\link{probotScaleForward}}).}
+  \item{input}{Numeric matrix of input features (rows = observations).}
 
-  \item{model}{Instantiated torch module returned by \code{probotMakeMDN(... )()}.}
+  \item{model}{An instantiated MDN \code{\link[torch]{nn_module}} object.}
 
-  \item{mdn_components}{Number of Gaussian mixture components in \code{model}.}
+  \item{mdn_components}{Number of mixture components used when the model was trained.}
+
+  \item{device}{Character string or \code{\link[torch]{torch_device}} object specifying
+   the computing device: \code{"cpu"}, \code{"cuda"}, or \code{"mps"}. If \code{NULL}
+   (default), the device is automatically inferred from \code{model}; if the model has
+   no parameters, falls back to \code{"mps"} if available otherwise \code{"cpu"}.}
 }
 \details{
-Prediction runs in evaluation mode and without gradient tracking.
+The model is set to evaluation mode (\code{\link[torch]{model$eval()}}) and predictions
+are computed inside a \code{\link[torch]{with_no_grad()}} block. The raw network output
+is unpacked by the internal \code{.probotUnpackMDN()} helper.
+
+When \code{device = NULL} (default), the input tensor is automatically placed on the
+same device as the model, eliminating device mismatch errors. Pass an explicit device
+to override (e.g., to force CPU inference).
+
+The returned tensors remain on the specified device. Convert to R matrices with
+\code{as.numeric()} or \code{as.matrix()} for downstream use.
 }
 \value{
-A list with elements:
-\itemize{
-  \item \code{mu}: tensor of component means.
-  \item \code{log10_sigma}: tensor of component \code{log10} standard deviations.
-  \item \code{logits}: tensor of unnormalized mixture logits.
-}
+A list containing:
+  \itemize{
+    \item \code{logits}: Tensor of shape \eqn{n \times K} (mixture logits).
+    \item \code{mu}: Tensor of shape \eqn{n \times K \times D} (component means).
+    \item \code{log10_sigma}: Tensor of shape \eqn{n \times K \times D} (log10 component scales).
+  }
+  where \eqn{n} is the number of observations, \eqn{K} is \code{mdn_components},
+  and \eqn{D} is \code{output_dim}.
 }
 \author{
 Aaron Robotham
@@ -34,10 +51,15 @@ Aaron Robotham
 }
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
-  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 3)()
-  x <- matrix(rnorm(12), ncol = 2)
+  set.seed(42)
+  torch::torch_manual_seed(42)
 
+  model <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3)()
+  x <- matrix(rnorm(20), ncol = 2)
+
+   # Device auto-detected from model
   pred <- probotPredictMDN(x, model, mdn_components = 3)
-  pred$mu$size()
+
+  names(pred)
 }
 }

@@ -1,23 +1,3 @@
-probotDataLoader <- function(input,
-                             output,
-                             batch = 1024,
-                             shuffle = TRUE,
-                             train_idx = NULL) {
-  if (is.null(train_idx)) {
-    train_idx = 1:nrow(input)
-  }
-
-  input_train <- torch_tensor(input[train_idx, ], dtype = torch_float())
-
-  output_train <- torch_tensor(output[train_idx, ], dtype = torch_float())
-
-  dataset <- tensor_dataset(input_train, output_train)
-
-  dataloader <- dataloader(dataset, batch_size = batch, shuffle = shuffle)
-
-  return(dataloader)
-}
-
 probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components, 
                                  loss_fn = probotLossMDN, lambda = 0) {
   model$train()
@@ -102,7 +82,7 @@ probotTrainMDN <- function(model,
 
     loss_history <- c(loss_history, metrics$loss)
 
-    if (verbose && (epoch %% 10 == 0 || epoch == 1)) {
+    if (verbose && (epoch %% checkpoint_every == 0 || epoch == 1)) {
       cat(
         sprintf(
           paste0(

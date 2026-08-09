@@ -1,16 +1,33 @@
-probotMakeMDN <- function(input_dim, output_dim, mdn_components, hidden_dims = c(128, 256, 256), activation = nnf_relu, dropout = 0) {
+probotMakeMDN <- function(input_dim, output_dim, mdn_components,
+                          hidden_dims = c(128, 256, 256), activation = nnf_relu, 
+                          dropout = 0, device = NULL) { # 1. Add device parameter
+  
   nn_module(
     "mlp",
     initialize = function() {
       self$activation_fn <- activation
       self$dropout_rate  <- dropout
+      
       dims <- c(input_dim, hidden_dims, mdn_components * (2 * output_dim + 1))
-      self$layers <- nn_module_list()
+      
+      layer_list <- list()
       for (i in seq_len(length(dims) - 1)) {
-        self$layers$append(nn_linear(dims[i], dims[i + 1]))
+        layer_list[[i]] <- nn_linear(dims[i], dims[i + 1])
       }
+      
+      self$layers <- nn_module_list(layer_list)
+      
+      #Determine device: Use provided device, or auto-detect MPS / CPU fallback
+      if (is.null(device)) {
+        target_device <- if (backends_mps_is_available()) torch_device("mps") else torch_device("cpu")
+      } else {
+        target_device <- torch_device(device)
+      }
+      
+      # 3. CRITICAL: Automatically move the entire module structure to the target hardware
+      self$to(device = target_device)
     },
-
+    
     forward = function(x) {
       n_layers <- length(self$layers)
       for (i in seq_len(n_layers - 1)) {

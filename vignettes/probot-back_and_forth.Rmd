@@ -62,8 +62,8 @@ make_polynomial_output <- function(theta) {
   list(output = y, x_grid = x_grid)
 }
 
-n_train <- 1e5
-n_test <- 1e4
+n_train <- 1e6
+n_test <- 1e5
 
 theta_train <- cbind(
   u = runif(n_train, -1, 1),
@@ -98,7 +98,7 @@ output_scaled <- probotScaleForward(poly_train$output)
 dataloader <- probotDataLoader(
   input = input_scaled,
   output = output_scaled,
-  batch = 1024
+  batch = 2^20
 )
 ```
 
@@ -199,7 +199,8 @@ head(post_samples)
 The triangle (corner) plot below shows the pairwise marginal distributions of the nine polynomial outputs for the first test observation. The blue reference points/lines mark the true values. Well-calibrated samples should scatter symmetrically around the truth.
 
 ```{r fig.width=6, fig.height=6, eval=eval_global}
-magtri(post_samples, refvals = poly_test$output[1,])
+magtri(post_samples, refvals = poly_test$output[1,],
+       quan_range = c(0.02, 0.98))
 ```
 
 ### Truth vs. predicted scatter plots
@@ -208,10 +209,11 @@ For a population-level view we plot the predicted posterior mean against the tru
 
 ```{r, eval=eval_global}
 for(i in 1:9){
-  magplot(poly_test$output[,i], forward_summary$post_mean[,i],
+  sel = sample(1e5,1e4)
+  magplot(poly_test$output[sel,i], forward_summary$post_mean[sel,i],
           xlab=paste0('Truth output: ',i), ylab=paste0('Pred output: ',i), pch='.')
-  magerr(poly_test$output[,i], forward_summary$post_mean[,i],
-         ylo = forward_summary$post_sd[,i], col=hsv(v=0, alpha=0.05))
+  magerr(poly_test$output[sel,i], forward_summary$post_mean[sel,i],
+         ylo = forward_summary$post_sd[sel,i], col=hsv(v=0, alpha=0.05))
   
 }
 ```

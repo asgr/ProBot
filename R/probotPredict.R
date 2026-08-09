@@ -1,16 +1,23 @@
-probotPredictMDN <- function(input, model, mdn_components){
+probotPredictMDN <- function(input, model, mdn_components, device = NULL){
+
+  if (is.null(device)) {
+    if (length(model$parameters) > 0) {
+      device <- model$parameters[[1]]$device
+    } else {
+      device <- if (backends_mps_is_available()) torch_device("mps") else torch_device("cpu")
+    }
+  }
 
   model$eval()
 
   with_no_grad({
-
     output <- model(
       torch_tensor(
         input,
-        dtype = torch_float()
+        dtype = torch_float(),
+        device = device
       )
     )
-
   })
 
   .probotUnpackMDN(output, mdn_components)

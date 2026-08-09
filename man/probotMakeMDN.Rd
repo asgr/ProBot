@@ -1,9 +1,10 @@
 \name{probotMakeMDN}
 \alias{probotMakeMDN}
-\title{Construct a Fully Connected Mixture Density Network}
+\title{Construct a Mixture Density Network Module}
 \description{
-Create a torch \code{nn_module} generator for a multilayer perceptron whose
-output parameterizes a Gaussian mixture.
+Construct an \code{\link[torch]{nn_module}} implementing a Multi-Layer Perceptron
+with a Mixture Density Network (MDN) output layer. The network maps input features
+to a mixture of Gaussian components over the output parameters.
 }
 \usage{
 probotMakeMDN(
@@ -12,42 +13,61 @@ probotMakeMDN(
   mdn_components,
   hidden_dims = c(128, 256, 256),
   activation = nnf_relu,
-  dropout = 0
+  dropout = 0,
+  device = NULL
 )
 }
 \arguments{
-  \item{input_dim}{Number of predictor features.}
+    \item{input_dim}{Number of input features.}
 
-  \item{output_dim}{Number of target dimensions.}
+    \item{output_dim}{Number of output parameters (each modeled as a mixture distribution).}
 
-  \item{mdn_components}{Number of Gaussian mixture components in model.}
+    \item{mdn_components}{Number of Gaussian mixture components in the MDN output layer.}
 
-  \item{hidden_dims}{Integer vector of hidden layer widths.}
+    \item{hidden_dims}{Numeric vector specifying the size of each hidden layer.
+     Defaults to \code{c(128, 256, 256)}.}
 
-  \item{activation}{Activation function applied between hidden layers. Stored as \code{$activation_fn} on the instantiated module.}
+    \item{activation}{Activation function applied after each hidden layer.
+     Defaults to \code{\link[torch]{nnf_relu}}. Also accepts \code{\link[torch]{nnf_silu}} or
+     \code{\link[torch]{nnf_gelu}}.}
 
-  \item{dropout}{Dropout probability applied after each hidden activation during training. Set to \code{0} (the default) to disable dropout.}
+    \item{dropout}{Dropout rate (fraction of activations to zero out during training).
+     Defaults to 0 (no dropout).}
+
+    \item{device}{Character string specifying the computing device: \code{"cpu"},
+     \code{"cuda"}, or \code{"mps"}. If \code{NULL} (default), auto-detects
+     \code{"mps"} on Apple Silicon systems, otherwise falls back to \code{"cpu"}}
 }
 \details{
-The final layer size is \code{mdn_components * (2 * output_dim + 1)} to encode, per component, \code{output_dim} means, \code{output_dim} log10 standard deviations, and one mixture logit. The activation function and dropout rate are stored as \code{$activation_fn} and \code{$dropout_rate} on the instantiated module for easy inspection and reuse.
+The final output layer has \code{mdn_components * (2 * output_dim + 1)} units,
+encoding \code{output_dim} means, \code{output_dim} log10-sigmas, and 1 logit
+per mixture component. The output is unpacked by \code{\link[=probotPredictMDN]{probotPredictMDN()}}.
+
+When \code{device = NULL}, the network attempts to use MPS (Apple GPU acceleration) if
+available, otherwise falls back to CPU. Pass an explicit device string to override.
 }
 \value{
-A torch module generator; instantiate with \code{probotMakeMDN(... )()}.
+An \code{\link[torch]{nn_module_class}} that must be called as a function
+(e.g., \code{probotMakeMDN(2, 2, 3)()}) to instantiate the model object.
 }
 \author{
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotPredictMDN}}, \code{\link{probotLossMDN}}
+\code{\link{probotPredictMDN}}, \code{\link{probotTrainMDN}}
 }
 \examples{
-if (requireNamespace("torch", quietly = TRUE)) {
-  net <- probotMakeMDN(input_dim = 3, output_dim = 2, mdn_components = 2)
-  model <- net()
+\dontrun{
+## Create and inspect model on default device (auto-detected)
+model_fn <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3)
+model <- model_fn()
 
-  x <- torch::torch_randn(c(5, 3))
-  out <- model(x)
-
-  as.integer(out$size(2))
+## Explicitly place on GPU/MPS
+model_gpu <- probotMakeMDN(
+  input_dim = 2,
+  output_dim = 2,
+  mdn_components = 3,
+  device = "mps"
+)()
 }
 }
