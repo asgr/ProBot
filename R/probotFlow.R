@@ -26,10 +26,7 @@ probotCouplingLayer <- nn_module(
       nn_linear(hidden_dim, 2 * self$d2)
     )
     
-    # Index vectors (1-based) for slicing theta/z along the column dimension
-    # These are stored as plain R integers; slicing is done with narrow() for clarity
-    self$d1_val <- self$d1  # first-half width
-    self$d2_val <- self$d2  # second-half width
+    # d1 (first-half width) and d2 (second-half width) are used for narrow() slicing
   },
   
   forward = function(theta, x) {
@@ -39,8 +36,8 @@ probotCouplingLayer <- nn_module(
     device <- theta$device
     
     # Split theta into two halves using narrow() — works cleanly on 2D (Batch, D) tensors
-    theta_1 <- theta$narrow(2, 1, self$d1_val)
-    theta_2 <- theta$narrow(2, self$d1_val + 1, self$d2_val)
+    theta_1 <- theta$narrow(2, 1, self$d1)
+    theta_2 <- theta$narrow(2, self$d1 + 1, self$d2)
     
     # Concatenate context with the first half to predict transform for the second half
     combined <- torch_cat(list(theta_1, x), dim = 2)
@@ -72,8 +69,8 @@ probotCouplingLayer <- nn_module(
     device <- z$device
     
     # Extract from swapped layout using narrow(): z_2 in [1, d2], z_1 in [d2+1, D]
-    z_2 <- z$narrow(2, 1, self$d2_val)
-    z_1 <- z$narrow(2, self$d2_val + 1, self$d1_val)
+    z_2 <- z$narrow(2, 1, self$d2)
+    z_1 <- z$narrow(2, self$d2 + 1, self$d1)
     
     # Predict transformation using the 'other' half (z_1) and context
     combined <- torch_cat(list(z_1, x), dim = 2)
