@@ -23,21 +23,27 @@ probotCouplingLayer <- nn_module(
       nn_gelu(),
       nn_linear(hidden_dim, hidden_dim),
       nn_gelu(),
-      nn_linear(hidden_dim, 2 * self$d2) 
+      nn_linear(hidden_dim, 2 * self$d2)
     )
     
-    # Initialize indices for splitting/joining
-    idx1 <- torch_arange(0, self$d1 - 1)$unsqueeze(0)$to(torch_long())
-    idx2 <- torch_arange(self$d1, self$dim_theta - 1)$unsqueeze(0)$to(torch_long())
+    # Indices for original order: theta_1 in [0, d1), theta_2 in [d1, dim_theta)
+    idx1 <- torch_arange(0, self$d1)$unsqueeze(0)$to(torch_long())
+    idx2 <- torch_arange(self$d1, self$dim_theta)$unsqueeze(0)$to(torch_long())
+    
+    # Indices for swapped order after forward: z_2 in [0, d2), z_1 in [d2, dim_theta)
+    idx_swap1 <- torch_arange(0, self$d2)$unsqueeze(0)$to(torch_long())
+    idx_swap2 <- torch_arange(self$d2, self$dim_theta)$unsqueeze(0)$to(torch_long())
     
     # Register buffers (non-learnable parameters that move to device)
     self$register_buffer("idx1", idx1)
     self$register_buffer("idx2", idx2)
+    self$register_buffer("idx_swap1", idx_swap1)
+    self$register_buffer("idx_swap2", idx_swap2)
   },
   
   forward = function(theta, x) {
     # theta: (Batch, D)
-    # x:     (Batch, C)
+    # x:      (Batch, C)
     
     device <- theta$device
     
@@ -74,11 +80,11 @@ probotCouplingLayer <- nn_module(
     
     device <- z$device
     
-    # Swap back to original coupling order
-    z_2 <- z$gather(2, self$idx1$to(device = device))
-    z_1 <- z$gather(2, self$idx2$to(device = device))
+    # Extract from swapped layout: z_2 in [0, d2), z_1 in [d2, dim_theta)
+    z_2 <- z$gather(2, self$idx_swap1$to(device = device))
+    z_1 <- z$gather(2, self$idx_swap2$to(device = device))
     
-    # Predict transformation using the 'other' half (now z_1) and context
+    # Predict transformation using the 'other' half (z_1) and context
     combined <- torch_cat(list(z_1, x), dim = 2)
     
     params <- self$shift_scale_net(combined)
@@ -101,10 +107,9 @@ probotNetworkFlow <- nn_module(
   initialize = function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32) {
     self$n_layers <- n_layers
     
-    # Stack multiple coupling layers
-    self$coupling_layers <- list()
-    for(i in seq_len(n_layers)) {
-      self$coupling_layers[[i]] <- probotCouplingLayer(dim_theta, dim_x, hidden_dim)
+    # Register each coupling layer directly on self so torch tracks parameters & device placement
+    for (i in seq_len(n_layers)) {
+      self[[paste0("coupling_layer_", i)]] <- probotCouplingLayer(dim_theta, dim_x, hidden_dim)
     }
   },
   
@@ -113,8 +118,8 @@ probotNetworkFlow <- nn_module(
     z <- theta
     log_det_jac <- torch_zeros(theta$size(1), device = theta$device)$unsqueeze(1)
     
-    for(i in seq_len(self$n_layers)) {
-      out <- self$coupling_layers[[i]]$forward(z, x)
+    for (i in seq_len(self$n_layers)) {
+      out <- self[[paste0("coupling_layer_", i)]]$forward(z, x)
       z <- out$z
       log_det_jac <- log_det_jac + out$log_det_jac
     }
@@ -127,8 +132,8 @@ probotNetworkFlow <- nn_module(
     theta <- z
     
     # Iterate layers in reverse order
-    for(i in seq_len(self$n_layers):1) {
-      theta <- self$coupling_layers[[i]]$inverse(theta, x)
+    for (i in rev(seq_len(self$n_layers))) {
+      theta <- self[[paste0("coupling_layer_", i)]]$inverse(theta, x)
     }
     
     return(theta)
@@ -139,14 +144,14 @@ probotNetworkFlow <- nn_module(
 
 probotLossNF <- function(true_theta, context_x, model, device = NULL) {
   # true_theta: (Batch, D) - The 'true' parameters from your simulation
-  # context_x:  (Batch, C) - The observed data / conditioning variables
+  # context_x:   (Batch, C) - The observed data / conditioning variables
   
-  if(is.null(device)) {
-    device <- if(length(model$parameters) > 0) model$parameters[[1]]$device else torch_device("cpu")
+  if (is.null(device)) {
+    device <- if (length(model$parameters) > 0) model$parameters[[1]]$device else torch_device("cpu")
   }
   
   true_theta <- true_theta$to(device = device)
-  context_x  <- context_x$to(device = device)
+  context_x <- context_x$to(device = device)
   
   out <- model$forward(true_theta, context_x)
   z <- out$z
@@ -171,18 +176,21 @@ probotSamplePostNF <- function(
     n_samples = 5000, 
     col_means = NULL, 
     col_sds = NULL, 
-    col_names = NULL
+    col_names = NULL,
+    dim_theta = NULL
 ) {
-  if (is.null(context_x$device)) {
-    device <- torch_device("cpu")
-    context_x <- context_x$to(device = device)
-  } else {
-    device <- context_x$device
-  }
+  device <- context_x$device
   
   model$eval()
   
-  n_dim <- length(col_means)
+  # Infer dimensionality from arguments in priority order
+  if (!is.null(dim_theta)) {
+    n_dim <- dim_theta
+  } else if (!is.null(col_means)) {
+    n_dim <- length(col_means)
+  } else {
+    stop("Either 'dim_theta' or 'col_means' must be provided to determine parameter dimensionality")
+  }
   
   # Draw samples from the base distribution N(0, I)
   z_base <- torch_randn(c(n_samples, n_dim), device = device)
@@ -191,7 +199,7 @@ probotSamplePostNF <- function(
     # Map base samples -> posterior parameters using inverse flow
     # Context must be expanded to match batch size if needed
     # Assuming context_x is (1, C), repeat it to (n_samples, C)
-    if(context_x$size(1) == 1 && n_samples > 1) {
+    if (context_x$size(1) == 1 && n_samples > 1) {
       context_expanded <- context_x$expand(c(n_samples, context_x$size(2)))
     } else {
       context_expanded <- context_x
@@ -204,7 +212,7 @@ probotSamplePostNF <- function(
   samples <- as.matrix(theta_samples_torch$to(device = "cpu"))
   
   # Unscale if necessary (reuses your existing scaling helper)
-  if(!is.null(col_means)) {
+  if (!is.null(col_means)) {
     samples <- probotScaleBackward(samples, col_means, col_sds)
   }
   
