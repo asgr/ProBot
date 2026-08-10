@@ -26,19 +26,10 @@ probotCouplingLayer <- nn_module(
       nn_linear(hidden_dim, 2 * self$d2)
     )
     
-    # Indices for original order: theta_1 in [0, d1), theta_2 in [d1, dim_theta)
-    idx1 <- torch_arange(0, self$d1)$unsqueeze(0)$to(torch_long())
-    idx2 <- torch_arange(self$d1, self$dim_theta)$unsqueeze(0)$to(torch_long())
-    
-    # Indices for swapped order after forward: z_2 in [0, d2), z_1 in [d2, dim_theta)
-    idx_swap1 <- torch_arange(0, self$d2)$unsqueeze(0)$to(torch_long())
-    idx_swap2 <- torch_arange(self$d2, self$dim_theta)$unsqueeze(0)$to(torch_long())
-    
-    # Register buffers (non-learnable parameters that move to device)
-    self$register_buffer("idx1", idx1)
-    self$register_buffer("idx2", idx2)
-    self$register_buffer("idx_swap1", idx_swap1)
-    self$register_buffer("idx_swap2", idx_swap2)
+    # Index vectors (1-based) for slicing theta/z along the column dimension
+    # These are stored as plain R integers; slicing is done with narrow() for clarity
+    self$d1_val <- self$d1  # first-half width
+    self$d2_val <- self$d2  # second-half width
   },
   
   forward = function(theta, x) {
@@ -47,9 +38,9 @@ probotCouplingLayer <- nn_module(
     
     device <- theta$device
     
-    # Split theta into two halves
-    theta_1 <- theta$gather(2, self$idx1$to(device = device))
-    theta_2 <- theta$gather(2, self$idx2$to(device = device))
+    # Split theta into two halves using narrow() — works cleanly on 2D (Batch, D) tensors
+    theta_1 <- theta$narrow(2, 1, self$d1_val)
+    theta_2 <- theta$narrow(2, self$d1_val + 1, self$d2_val)
     
     # Concatenate context with the first half to predict transform for the second half
     combined <- torch_cat(list(theta_1, x), dim = 2)
@@ -57,10 +48,10 @@ probotCouplingLayer <- nn_module(
     # Get shift and log_scale
     params <- self$shift_scale_net(combined) # (Batch, 2 * d2)
     
-    # Unsplit into two vectors of length d2
-    split_params <- torch_unsplit(params, list(self$d2, self$d2), dim = 2)
+    # Split into two vectors of length d2
+    split_params <- torch_chunk(params, 2, dim = 2)
     shift <- split_params[[1]]   
-    log_scale <- split_params[[2]] 
+    log_scale <- torch_tanh(split_params[[2]])  # tanh-clamp for numerical stability
     
     # Apply affine transformation: z_2 = (theta_2 - t) * exp(s)
     z_2 <- (theta_2 - shift) * torch_exp(log_scale)
@@ -80,17 +71,17 @@ probotCouplingLayer <- nn_module(
     
     device <- z$device
     
-    # Extract from swapped layout: z_2 in [0, d2), z_1 in [d2, dim_theta)
-    z_2 <- z$gather(2, self$idx_swap1$to(device = device))
-    z_1 <- z$gather(2, self$idx_swap2$to(device = device))
+    # Extract from swapped layout using narrow(): z_2 in [1, d2], z_1 in [d2+1, D]
+    z_2 <- z$narrow(2, 1, self$d2_val)
+    z_1 <- z$narrow(2, self$d2_val + 1, self$d1_val)
     
     # Predict transformation using the 'other' half (z_1) and context
     combined <- torch_cat(list(z_1, x), dim = 2)
     
     params <- self$shift_scale_net(combined)
-    split_params <- torch_unsplit(params, list(self$d2, self$d2), dim = 2)
+    split_params <- torch_chunk(params, 2, dim = 2)
     shift <- split_params[[1]]
-    log_scale <- split_params[[2]]
+    log_scale <- torch_tanh(split_params[[2]])
     
     # Reverse affine transformation: theta_2 = z_2 / exp(s) + t
     theta_2 <- z_2 / torch_exp(log_scale) + shift
@@ -197,9 +188,11 @@ probotSamplePostNF <- function(
   
   with_no_grad({
     # Map base samples -> posterior parameters using inverse flow
-    # Context must be expanded to match batch size if needed
-    # Assuming context_x is (1, C), repeat it to (n_samples, C)
-    if (context_x$size(1) == 1 && n_samples > 1) {
+    # context_x must be 2D (1, C); expand it to (n_samples, C)
+    if (context_x$dim() == 1L) {
+      context_x <- context_x$unsqueeze(1L)  # (C,) -> (1, C)
+    }
+    if (context_x$size(1) != n_samples) {
       context_expanded <- context_x$expand(c(n_samples, context_x$size(2)))
     } else {
       context_expanded <- context_x
