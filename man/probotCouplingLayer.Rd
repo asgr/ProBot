@@ -11,11 +11,11 @@ applied to the other half, and then swaps the halves for full mixing across laye
 probotCouplingLayer(dim_theta, dim_x, hidden_dim = 32)
 }
 \arguments{
-   \item{dim_theta}{Total dimensionality of the parameter space (i.e., number of output parameters).}
+    \item{dim_theta}{Total dimensionality of the parameter space (i.e., number of output parameters).}
 
-   \item{dim_x}{Dimensionality of the context/input features used to condition the transformation.}
+    \item{dim_x}{Dimensionality of the context/input features used to condition the transformation.}
 
-   \item{hidden_dim}{Number of units in each hidden layer of the internal shift/scale network.
+    \item{hidden_dim}{Number of units in each hidden layer of the internal shift/scale network.
    Defaults to 32.}
 }
 \details{
@@ -36,8 +36,8 @@ Halves are swapped after each transformation to ensure full mixing across subseq
 coupling layers.
 }
 \value{
-An \code{\link[torch]{nn_module_class}} that must be called as a function
-(e.g., \code{probotCouplingLayer(2, 3)()}) to instantiate the module object.
+An instantiated \code{\link[torch]{nn_module}} object ready for use.
+The call creates the module directly (no additional parentheses needed).
 }
 \author{
 Aaron Robotham
@@ -46,16 +46,15 @@ Aaron Robotham
 \code{\link{probotNetworkFlow}}, \code{\link{probotLossNF}}
 }
 \examples{
-\dontrun{
+if (requireNamespace("torch", quietly = TRUE)) {
 ## Create a coupling layer for 2 parameters conditioned on 3 context features
-layer_fn <- probotCouplingLayer(dim_theta = 2, dim_x = 3)
-layer <- layer_fn()
+layer <- probotCouplingLayer(dim_theta = 2, dim_x = 3)
 
 ## Forward and inverse passes require torch tensors
 theta <- torch::torch_randn(c(10, 2))
 x <- torch::torch_randn(c(10, 3))
 
 out <- layer$forward(theta, x)
-names(out)  # "z" and "log_det_jac"
+names(out)   # "z" and "log_det_jac"
 }
 }
