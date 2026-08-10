@@ -62,8 +62,8 @@ make_polynomial_output <- function(theta) {
   list(output = y, x_grid = x_grid)
 }
 
-n_train <- 1e6
-n_test <- 1e5
+n_train <- 1e5
+n_test <- 1e4
 
 theta_train <- cbind(
   u = runif(n_train, -1, 1),
@@ -98,7 +98,7 @@ output_scaled <- probotScaleForward(poly_train$output)
 dataloader <- probotDataLoader(
   input = input_scaled,
   output = output_scaled,
-  batch = 2^20
+  batch = 1024
 )
 ```
 
@@ -116,17 +116,17 @@ forward_model <- probotMakeMDN(
   hidden_dims = c(64, 128, 64)
 )()
 
-forward_optimizer <- optim_adam(forward_model$parameters, lr = 0.01)
+forward_optimizer <- optim_adam(forward_model$parameters, lr = 3e-4)
 
 forward_fit <- probotTrainMDN(
   model = forward_model,
   dataloader = dataloader,
   optimizer = forward_optimizer,
-  epochs = 100,
+  epochs = 200,
   mdn_components = 3,
   verbose = TRUE,
   early_stop = FALSE,
-  lambda = 0.1
+  lambda = 0.01
 )
 ```
 
@@ -209,12 +209,11 @@ For a population-level view we plot the predicted posterior mean against the tru
 
 ```{r, eval=eval_global}
 for(i in 1:9){
-  sel = sample(1e5,1e4)
+  sel = 1:1e4
   magplot(poly_test$output[sel,i], forward_summary$post_mean[sel,i],
           xlab=paste0('Truth output: ',i), ylab=paste0('Pred output: ',i), pch='.')
   magerr(poly_test$output[sel,i], forward_summary$post_mean[sel,i],
          ylo = forward_summary$post_sd[sel,i], col=hsv(v=0, alpha=0.05))
-  
 }
 ```
 
@@ -227,7 +226,8 @@ PIT_out = probotPIT(forward_pred,
             params = poly_test$output,
             col_means = attr(output_scaled, "col_scale")$col_means,
             col_sds = attr(output_scaled, "col_scale")$col_sds,
-            col_names = colnames(output_scaled)
+            col_names = colnames(output_scaled),
+            n_test = 1e4
 )
 ```
 
@@ -297,7 +297,7 @@ inverse_model <- probotMakeMDN(
   hidden_dims = c(64, 128, 64)
 )()
 
-inverse_optimizer <- optim_adam(inverse_model$parameters, lr = 0.01)
+inverse_optimizer <- optim_adam(inverse_model$parameters, lr = 3e-4)
 
 inverse_fit <- probotTrainMDN(
   model = inverse_model,
@@ -374,7 +374,8 @@ head(post_samples)
 ```
 
 ```{r fig.width=6, fig.height=6, eval=eval_global}
-magtri(post_samples, refvals = theta_test[1, ])
+magtri(post_samples, refvals = theta_test[1, ], 
+       quan_range = c(0.02,0.98))
 ```
 
 ### Summary comparison for one observation
