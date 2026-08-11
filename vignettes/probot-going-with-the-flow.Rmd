@@ -129,7 +129,7 @@ to handle mini-batching and device placement efficiently.
 
 ```{r build-tensors, eval = eval_global}
 flow_dataloader <- probotDataLoader(
-  input  = as.matrix(output_scaled),
+  input  = output_scaled,
   output = input_scaled,
   batch  = 1024
 )
