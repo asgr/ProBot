@@ -17,7 +17,7 @@ probotSingleEpochFlow <- function(model,
     current_loss$backward()
     optimizer$step()
 
-    running_loss <- running_loss + current_loss$item() * length(batch[[1]])
+    running_loss <- running_loss + current_loss$item() * batch[[1]]$size(1)
   })
 
   list(
@@ -84,7 +84,7 @@ probotMultiEpochFlow <- function(model,
 
     if (!is.null(checkpoint_dir) &&
         epoch %% checkpoint_every == 0) {
-      torch_save(
+      torch::torch_save(
         list(
           epoch = epoch,
           model = model$state_dict(),
