@@ -1,0 +1,455 @@
+---
+title: "ProBot: Going with the Flow"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ProBot: Going with the Flow}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(ProBot)
+library(torch)
+library(magicaxis)
+set.seed(1)
+torch_manual_seed(1)
+eval_global <- FALSE
+```
+
+## Overview
+
+**ProBot** supports two complementary approaches to simulation-based inference (SBI).
+The *Back and Forth* vignette covers the classic **Mixture Density Network** (MDN)
+workflow. This vignette introduces the second approach: **Normalising Flows** (NFs),
+specifically a conditional Real-valued Non-Volume Preserving (RealNVP) architecture
+built from affine coupling layers.
+
+### What is a Normalising Flow?
+
+A normalising flow learns an invertible, differentiable mapping between two probability
+distributions. In the SBI context the flow maps a simple base distribution
+(standard normal) to the complex posterior distribution over simulator parameters,
+conditioned on observed data.
+
+Concretely, the flow `f` transforms a latent vector `z ~ N(0, I)` into a parameter
+vector `θ = f⁻¹(z | x)` for a given observation `x`. Training minimises the negative
+log-likelihood of the true parameters under the induced distribution:
+
+```
+log p(θ | x) = log p_base(f(θ, x)) + log |det J_f(θ, x)|
+```
+
+The key advantage over MDNs is that the posterior is represented as an *exact*
+density rather than a finite Gaussian mixture: the flow can represent arbitrarily
+complex, multi-modal posteriors without fixing the number of components in advance.
+Sampling is fast: draw `z ~ N(0, I)` and apply the inverse transformation.
+
+### The coupling-layer architecture
+
+**ProBot**'s `probotNetworkFlow` stacks multiple `probotCouplingLayer` modules.
+Each coupling layer:
+
+1. Splits the parameter vector `θ` into two halves, `θ₁` and `θ₂`.
+2. Uses a small network that takes `(θ₁, x)` as input to predict an affine shift `t`
+   and log-scale `s` for `θ₂`.
+3. Applies the transformation `z₂ = (θ₂ − t) · exp(s)`, leaving `θ₁` unchanged.
+4. Swaps the two halves so successive layers transform the complementary subset.
+
+The log-determinant of the Jacobian is the sum of the log-scale values across
+transformed dimensions — cheap to compute and numerically stable.
+
+---
+
+## The toy problem
+
+We reuse the polynomial toy problem from the *Back and Forth* vignette. A generative
+function maps two input parameters (`u`, `v`) to the coefficients of a polynomial
+that is then evaluated on a nine-point grid, giving a nine-dimensional output vector.
+
+```{r simulator}
+make_polynomial_output <- function(theta) {
+  a0 <- 0.3 + 0.8 * theta[, 1] - 0.4 * theta[, 2]
+  a1 <- -1.2 + 0.5 * theta[, 1]^2 + 0.7 * theta[, 2]
+  a2 <- 0.6 * sin(pi * theta[, 1]) - 0.3 * theta[, 2]^2
+
+  x_grid <- seq(-1, 1, length.out = 9)
+  y <- vapply(
+    x_grid,
+    function(x) a0 + a1 * x + a2 * x^2,
+    numeric(nrow(theta))
+  )
+
+  colnames(y) <- paste0("x", seq_along(x_grid))
+  list(output = y, x_grid = x_grid)
+}
+```
+
+### Simulating training and test data
+
+```{r simulate-data, eval = eval_global}
+n_train <- 1e5
+n_test  <- 1e4
+
+theta_train <- cbind(
+  u = runif(n_train, -1, 1),
+  v = runif(n_train, -1, 1)
+)
+
+theta_test <- cbind(
+  u = runif(n_test, -1, 1),
+  v = runif(n_test, -1, 1)
+)
+
+poly_train <- make_polynomial_output(theta_train)
+poly_test  <- make_polynomial_output(theta_test)
+```
+
+---
+
+## Building a Normalising Flow for inverse inference
+
+The inverse problem asks: given an observed nine-dimensional polynomial vector `x`,
+what is the posterior distribution over the two generating parameters `(u, v)`?
+
+### Scaling and data loading
+
+As with MDNs, we standardise inputs and outputs before training.
+
+```{r scale-data, eval = eval_global}
+# The polynomial outputs are the context (conditioning variable)
+output_scaled <- probotScaleForward(poly_train$output)
+
+# The latent parameters are what the flow learns to recover
+input_scaled  <- probotScaleForward(theta_train)
+```
+
+The flow is trained using `probotMultiEpochFlow()`, which leverages a `probotDataLoader`
+to handle mini-batching and device placement efficiently.
+
+```{r build-tensors, eval = eval_global}
+flow_dataloader <- probotDataLoader(
+  input  = input_scaled,
+  output = as.matrix(output_scaled),
+  batch  = 1024
+)
+```
+
+### Constructing the flow network
+
+`probotNetworkFlow` accepts three key hyperparameters:
+
+- `dim_theta` — dimensionality of the parameter space (2 for `u` and `v`).
+- `dim_x` — dimensionality of the conditioning context (9 polynomial values).
+- `n_layers` — number of coupling layers; more layers increase expressiveness.
+- `hidden_dim` — width of the shift/scale network inside each coupling layer.
+
+```{r build-flow, eval = eval_global}
+flow_model <- probotNetworkFlow(
+  dim_theta  = ncol(theta_train),
+  dim_x      = ncol(poly_train$output),
+  n_layers   = 6,
+  hidden_dim = 64
+)()
+```
+
+### Training the flow
+
+Training is handled by `probotMultiEpochFlow()`, which wraps the negative-log-likelihood
+loop and includes optional features like early stopping.
+
+```{r train-flow, eval = eval_global}
+flow_optimizer <- optim_adam(flow_model$parameters, lr = 3e-4)
+
+train_result <- probotMultiEpochFlow(
+  model     = flow_model,
+  dataloader = flow_dataloader,
+  optimizer = flow_optimizer,
+  epochs    = 200,
+  verbose   = TRUE
+)
+
+flow_model <- train_result$model
+loss_history <- train_result$history$loss
+```
+
+### Inspecting the training history
+
+```{r plot-history, fig.width = 7, fig.height = 4, eval = eval_global}
+magplot(
+  seq_along(loss_history), loss_history,
+  type = "l", col = "steelblue", lwd = 2,
+  xlab = "Epoch", ylab = "Mean NLL",
+  main = "Normalising Flow — training loss"
+)
+```
+
+A monotonically decreasing loss that flattens toward the end confirms the flow has
+converged. Unlike an MDN, the NLL of a flow does not have the same units across
+problems, but steady decrease and eventual plateau are the key signals.
+
+---
+
+## Posterior sampling
+
+Once trained, drawing samples from the posterior for a new observation requires only:
+
+1. Draw `z ~ N(0, I)` (one sample per desired posterior point).
+2. Evaluate the inverse flow: `θ = f⁻¹(z | x_obs)`.
+3. Unscale the result back to the original parameter space.
+
+`probotSamplePostNF()` encapsulates these steps.
+
+```{r scale-test, eval = eval_global}
+# Scale the test context with the training statistics
+output_test_scaled <- probotScaleForward(
+  poly_test$output,
+  col_means = attr(output_scaled, "col_scale")$col_means,
+  col_sds   = attr(output_scaled, "col_scale")$col_sds
+)
+```
+
+### Posterior for a single observation
+
+```{r single-posterior, eval = eval_global}
+obs_idx <- 1
+context_obs <- torch_tensor(
+  output_test_scaled[obs_idx, , drop = FALSE],
+  dtype = torch_float()
+)$to(device = device)
+
+post_samples <- probotSamplePostNF(
+  context_x  = context_obs,
+  model      = flow_model,
+  n_samples  = 5000,
+  col_means  = attr(input_scaled, "col_scale")$col_means,
+  col_sds    = attr(input_scaled, "col_scale")$col_sds,
+  col_names  = colnames(theta_train)
+)
+
+head(post_samples)
+```
+
+The corner plot below shows the joint posterior over `(u, v)` for the first test
+observation. The blue reference lines mark the true generating values.
+
+```{r corner-plot, fig.width = 5, fig.height = 5, eval = eval_global}
+magtri(post_samples, refvals = theta_test[obs_idx, ],
+       quan_range = c(0.02, 0.98))
+```
+
+Because the forward mapping from `(u, v)` to the nine polynomial values is nonlinear
+and non-injective, the posterior can be multimodal: two distinct parameter settings
+can produce nearly identical polynomial curves. The normalising flow captures this
+multi-modal structure naturally without specifying the number of modes in advance.
+
+---
+
+## Population-level summaries
+
+For a broader assessment we compute posterior means and standard deviations across
+the test set by sampling the flow at each observation.
+
+```{r population-summaries, eval = eval_global}
+n_eval    <- min(n_test, 2000)   # limit for speed in this demo
+post_mean <- matrix(NA_real_, n_eval, ncol(theta_test), dimnames = list(NULL, colnames(theta_test)))
+post_sd   <- matrix(NA_real_, n_eval, ncol(theta_test), dimnames = list(NULL, colnames(theta_test)))
+
+for (i in seq_len(n_eval)) {
+  ctx_i <- torch_tensor(
+    output_test_scaled[i, , drop = FALSE],
+    dtype = torch_float()
+  )$to(device = device)
+
+  samp_i <- probotSamplePostNF(
+    context_x = ctx_i,
+    model     = flow_model,
+    n_samples = 500,
+    col_means = attr(input_scaled, "col_scale")$col_means,
+    col_sds   = attr(input_scaled, "col_scale")$col_sds,
+    col_names = colnames(theta_train)
+  )
+
+  post_mean[i, ] <- colMeans(samp_i)
+  post_sd[i, ]   <- apply(samp_i, 2, sd)
+
+  if (i %% 500 == 0) cat(i, "\n")
+}
+```
+
+### Truth vs. predicted scatter plots
+
+For each parameter we plot the posterior mean against the true generating value.
+Tight, symmetric scatter around the diagonal confirms accurate posterior location.
+
+```{r scatter-plots, eval = eval_global}
+for (j in seq_len(ncol(theta_test))) {
+  magplot(
+    theta_test[seq_len(n_eval), j], post_mean[, j],
+    xlab = paste0("True ",      colnames(theta_test)[j]),
+    ylab = paste0("Predicted ", colnames(theta_test)[j]),
+    pch  = "."
+  )
+  magerr(
+    theta_test[seq_len(n_eval), j], post_mean[, j],
+    ylo = post_sd[, j],
+    col = hsv(v = 0, alpha = 0.05)
+  )
+  abline(0, 1, col = "red", lty = 2)
+}
+```
+
+---
+
+## Calibration diagnostics
+
+Because `probotPIT()` and `probotTARP()` call `probotSamplePostMDN()` internally,
+we implement equivalent NF-based diagnostics directly. The logic is identical — only
+the sampling function differs.
+
+### PIT: marginal calibration
+
+For each test observation and each parameter dimension the PIT value is the fraction
+of posterior samples that fall *below* the true value. Under a perfect posterior
+this is uniform on [0, 1].
+
+```{r pit-nf, eval = eval_global}
+n_pit   <- min(n_test, 1000)
+n_samp_pit <- 2000
+
+pit_nf <- matrix(NA_real_, n_pit, ncol(theta_test),
+                 dimnames = list(NULL, colnames(theta_test)))
+
+for (i in seq_len(n_pit)) {
+  ctx_i <- torch_tensor(
+    output_test_scaled[i, , drop = FALSE],
+    dtype = torch_float()
+  )$to(device = device)
+
+  samp_i <- probotSamplePostNF(
+    context_x = ctx_i,
+    model     = flow_model,
+    n_samples = n_samp_pit,
+    col_means = attr(input_scaled, "col_scale")$col_means,
+    col_sds   = attr(input_scaled, "col_scale")$col_sds,
+    col_names = colnames(theta_train)
+  )
+
+  for (j in seq_len(ncol(theta_test))) {
+    pit_nf[i, j] <- mean(samp_i[, j] <= theta_test[i, j])
+  }
+
+  if (i %% 200 == 0) cat(i, "\n")
+}
+```
+
+```{r pit-plot, fig.width = 5, fig.height = 5, eval = eval_global}
+magtri(pit_nf)
+```
+
+**What to look for:**
+
+- *Uniform histograms* on the diagonal → good marginal calibration.
+- *U-shaped histograms* → posterior too narrow (truth falls in the tails too often).
+- *Λ-shaped histograms* → posterior too wide (truth clusters near the centre).
+- *Skewed histograms* → systematic bias in the posterior location.
+
+### TARP: joint calibration
+
+TARP projects posterior samples and the true parameter vector onto a random unit
+direction and computes the coverage fraction. Repeating over many observations and
+averaging over random directions gives an omnibus test of the full joint posterior.
+
+```{r tarp-nf, eval = eval_global}
+n_tarp      <- min(n_test, 1000)
+n_samp_tarp <- 2000
+
+tarp_nf <- numeric(n_tarp)
+
+for (i in seq_len(n_tarp)) {
+  ctx_i <- torch_tensor(
+    output_test_scaled[i, , drop = FALSE],
+    dtype = torch_float()
+  )$to(device = device)
+
+  samp_i <- probotSamplePostNF(
+    context_x = ctx_i,
+    model     = flow_model,
+    n_samples = n_samp_tarp,
+    col_means = attr(input_scaled, "col_scale")$col_means,
+    col_sds   = attr(input_scaled, "col_scale")$col_sds,
+    col_names = colnames(theta_train)
+  )
+
+  direction    <- rnorm(ncol(samp_i))
+  direction    <- direction / sqrt(sum(direction^2))
+  truth_proj   <- sum(theta_test[i, ] * direction)
+  sample_proj  <- as.vector(samp_i %*% direction)
+  tarp_nf[i]  <- mean(sample_proj <= truth_proj)
+
+  if (i %% 200 == 0) cat(i, "\n")
+}
+```
+
+```{r tarp-plot, fig.width = 6, fig.height = 4, eval = eval_global}
+maghist(
+  tarp_nf, breaks = 20,
+  xlab = "TARP coverage", ylab = "Count",
+  main = "Normalising Flow — TARP diagnostic"
+)
+abline(h = length(tarp_nf) / 20, lty = 2, col = "red")
+
+ks.test(tarp_nf, "punif")
+```
+
+**Interpreting the TARP histogram:**
+
+- *Flat histogram* → joint posterior is well calibrated.
+- *Excess mass near 0.5* → posterior is over-dispersed (too wide in joint space).
+- *Excess mass near 0 and 1* → posterior is under-dispersed (too narrow in joint space).
+- *Significant KS p-value* (p < 0.05) → evidence of joint miscalibration.
+
+---
+
+## Normalising Flow vs. MDN: when to use which
+
+| Criterion | MDN | Normalising Flow |
+|---|---|---|
+| Posterior representation | Finite Gaussian mixture | Exact, arbitrarily complex |
+| Multi-modality | Limited to K components | Unlimited (architecture permitting) |
+| Training stability | Generally stable | May require careful tuning |
+| Sampling speed | Very fast (closed-form mixture) | Fast (single inverse pass) |
+| Density evaluation | Tractable mixture sum | Tractable via change-of-variables |
+| Typical use case | Low-to-medium posterior complexity | Complex / multi-modal posteriors |
+
+Normalising flows are particularly well-suited when:
+
+- The true posterior is known to be multi-modal or banana-shaped.
+- A fixed number of Gaussian components cannot capture the posterior adequately.
+- You need a continuous, differentiable posterior density (e.g., for nested sampling seeding).
+
+MDNs are often preferable when:
+
+- The posterior is approximately Gaussian or a small mixture thereof.
+- Training speed and simplicity are priorities.
+- You want built-in ProBot utilities (e.g., `probotPIT()`, `probotTARP()`) without modification.
+
+---
+
+## Summary
+
+| Function | Role |
+|---|---|
+| `probotCouplingLayer` | Single affine coupling layer: maps `(θ, x) → (z, log_det_jac)` |
+| `probotNetworkFlow` | Stacked coupling-layer flow: forward (θ → z) and inverse (z → θ) |
+| `probotLossNF()` | Negative log-likelihood loss for flow training |
+| `probotSamplePostNF()` | Draw posterior samples via the inverse flow |
+| `probotScaleForward()` / `probotScaleBackward()` | Standardise columns and reverse the transform |
+
+The normalised flow architecture adds an expressive alternative to the MDN backbone
+without changing the broader ProBot workflow: scale data, train on (parameter,
+observation) pairs, sample the posterior, validate calibration with PIT and TARP.
+The key difference is that the posterior is now represented as an invertible
+transformation of a standard normal, rather than a finite mixture of Gaussians —
+enabling exact density evaluation and richer posteriors at the cost of a slightly
+more involved training loop.
