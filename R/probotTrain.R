@@ -2,7 +2,6 @@ probotSingleEpochFlow <- function(model, dataloader, optimizer,
                                   loss_fn = probotLossNF) {
   model$train()
   running_loss <- 0
-  n_batches <- 0
 
   coro::loop(for (batch in dataloader) {
     optimizer$zero_grad()
@@ -13,7 +12,6 @@ probotSingleEpochFlow <- function(model, dataloader, optimizer,
     optimizer$step()
 
     running_loss <- running_loss + current_loss$item() * batch[[1]]$size(1)
-    n_batches <- n_batches + 1
   })
 
   list(
