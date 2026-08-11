@@ -48,7 +48,7 @@ probotCouplingLayer <- nn_module(
     # Split into two vectors of length d2
     split_params <- torch_chunk(params, 2, dim = 2)
     shift <- split_params[[1]]   
-    log_scale <- 2 * torch_tanh(split_params[[2]] / 2)  # soft clamp to (-2, 2) for numerical stability
+    log_scale <- 4 * torch_tanh(split_params[[2]] / 4)  # soft clamp to (-2, 2) for numerical stability
     
     # Apply affine transformation: z_2 = (theta_2 - t) * exp(s)
     z_2 <- (theta_2 - shift) * torch_exp(log_scale)
@@ -78,7 +78,7 @@ probotCouplingLayer <- nn_module(
     params <- self$shift_scale_net(combined)
     split_params <- torch_chunk(params, 2, dim = 2)
     shift <- split_params[[1]]
-    log_scale <- 2 * torch_tanh(split_params[[2]] / 2)  # soft clamp to (-2, 2) for numerical stability
+    log_scale <- 4 * torch_tanh(split_params[[2]] / 4)  # soft clamp to (-clamp, clamp) for numerical stability
     
     # Reverse affine transformation: theta_2 = z_2 / exp(s) + t
     theta_2 <- z_2 / torch_exp(log_scale) + shift
