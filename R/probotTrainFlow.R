@@ -66,7 +66,7 @@ probotMultiEpochFlow <- function(model,
           cat(sprintf(
             paste0(
               "\nEarly stopping at epoch %d: ",
-              "average loss improved by only %.6f ",
+              "average loss changed by %.6f ",
               "over the last %d epochs ",
               "(threshold = %.6f)\n\n"
             ),
