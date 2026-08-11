@@ -114,7 +114,7 @@ probotTrainMDN <- function(model,
       previous_mean <- mean(previous_window)
       improvement <- previous_mean - recent_mean
 
-      if (improvement < stop_delta) {
+      if (improvement > 0 & improvement < stop_delta) {
         if (verbose) {
           cat(sprintf(
             paste0(
