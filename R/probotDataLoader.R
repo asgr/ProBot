@@ -9,7 +9,13 @@ probotDataLoader <- function(input,
   }
   
   #Determine device: Use provided device, or auto-detect MPS / CPU fallback
-  device = if(is.null(device)){"mps"}else{"cpu"}
+  if (is.null(device)) {
+    device <- tryCatch({
+      if (torch::cuda_is_available()) "cuda"
+      else if (torch::backends_mps_is_available()) "mps"
+      else "cpu"
+    }, error = function(e) "cpu")
+  }
   
   # Allocate tensors directly onto the specified target hardware
   input_train <- torch_tensor(input[train_idx, ], dtype = torch_float(), device = device)
