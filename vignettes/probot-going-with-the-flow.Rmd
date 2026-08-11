@@ -132,19 +132,8 @@ tensors to leverage GPU/MPS acceleration.
 ```{r build-tensors, eval = eval_global}
 device <- if (backends_mps_is_available()) torch_device("mps") else torch_device("cpu")
 
-theta_tensor  <- torch_tensor(input_scaled,                     dtype = torch_float())$to(device = device)
-context_tensor <- torch_tensor(poly_train$output |> scale() |> as.matrix(),
-                                dtype = torch_float())$to(device = device)
-
-# Reuse stored scaling for the context
-context_tensor <- torch_tensor(
-  probotScaleForward(
-    poly_train$output,
-    col_means = attr(output_scaled, "col_scale")$col_means,
-    col_sds   = attr(output_scaled, "col_scale")$col_sds
-  ) |> as.matrix(),
-  dtype = torch_float()
-)$to(device = device)
+theta_tensor   <- torch_tensor(input_scaled,        dtype = torch_float())$to(device = device)
+context_tensor <- torch_tensor(as.matrix(output_scaled), dtype = torch_float())$to(device = device)
 ```
 
 ### Constructing the flow network
