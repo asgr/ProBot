@@ -33,6 +33,32 @@ probotLossMDN <- function(
   -log_mix_prob$mean()
 }
 
+probotLossNF <- function(true_theta, context_x, model, device = NULL) {
+  # true_theta: (Batch, D) - The 'true' parameters from your simulation
+  # context_x:   (Batch, C) - The observed data / conditioning variables
+  
+  if (is.null(device)) {
+    device <- if (length(model$parameters) > 0) model$parameters[[1]]$device else torch_device("cpu")
+  }
+  
+  true_theta <- true_theta$to(device = device)
+  context_x <- context_x$to(device = device)
+  
+  out <- model$forward(true_theta, context_x)
+  z <- out$z
+  log_det_jac <- out$log_det_jac
+  
+  # Base distribution: Standard Normal N(0, I)
+  # log p_base(z) = -0.5 * sum(z^2 + log(2*pi)) across dimensions
+  log_p_z <- -0.5 * (z^2 + log(2 * pi))$sum(dim = 2)$unsqueeze(1)
+  
+  # Total log likelihood: log p(true_theta | x) = log p_base(z) + log|det(J)|
+  log_likelihood <- log_p_z + log_det_jac
+  
+  # Return Negative Log Likelihood (to be minimized by optimizer)
+  -log_likelihood$mean()
+}
+
 probotLossMSE <- function(
     output_true,
     output_pred,
