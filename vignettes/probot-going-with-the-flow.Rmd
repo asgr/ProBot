@@ -165,7 +165,7 @@ train_result <- probotMultiEpochFlow(
   model     = flow_model,
   dataloader = flow_dataloader,
   optimizer = flow_optimizer,
-  epochs    = 200,
+  epochs    = 100,
   verbose   = TRUE
 )
 
