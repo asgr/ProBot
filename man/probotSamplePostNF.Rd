@@ -41,8 +41,8 @@ probotSamplePostNF(
    \code{dim_theta} and \code{col_means} are \code{NULL}, the function throws an error.}
 }
 \details{
-The model is set to evaluation mode (\code{\link[torch]{model$eval()}}) and all
-transformations are computed inside a \code{\link[torch]{with_no_grad()}} block
+The model is set to evaluation mode (\code{model$eval()}) and all
+transformations are computed inside a \code{\link[torch]{with_no_grad}} block
 to avoid unnecessary memory allocations.
 
 If \code{context_x} is 1D, it is expanded to match \code{n_samples} rows so that
@@ -50,7 +50,7 @@ each sample is conditioned on the same observed data. If \code{context_x} alread
 has \code{n_samples} rows, it is used as-is.
 
 When \code{col_means} is provided, the sampled parameters are automatically
-unstandardized using \code{\link[=probotScaleBackward]{probotScaleBackward()}},
+unstandardized using \code{\link{probotScaleBackward}},
 which reverses the scaling applied during training.
 }
 \value{

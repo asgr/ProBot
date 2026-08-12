@@ -1,6 +1,6 @@
-\name{probotSingleEpochFlow}
+\name{probotTrainFlow}
 \alias{probotSingleEpochFlow}
-\alias{probotMultiEpochFlow}
+\alias{probotTrainFlow}
 \title{Train Normalizing Flow Models for One Epoch or Many}
 \description{
 Run one optimisation epoch for a flow model or iterate multiple epochs with
@@ -9,13 +9,13 @@ optional early stopping and checkpoint saving.
 \usage{
 probotSingleEpochFlow(model, dataloader, optimizer, loss_fn = probotLossNF)
 
-probotMultiEpochFlow(model, dataloader, optimizer, epochs = 100,
+probotTrainFlow(model, dataloader, optimizer, epochs = 100,
   loss_fn = probotLossNF, checkpoint_dir = NULL, checkpoint_every = 10,
   history = NULL, verbose = TRUE, early_stop = TRUE, stop_window = 20,
   stop_delta = 1e-2)
 }
 \arguments{
-  \item{model}{Instantiated torch module returned by \code{probotNetworkFlow(... )()}.}
+  \item{model}{Instantiated torch module returned by \code{probotMakeFlow(... )()}.}
 
   \item{dataloader}{Torch data loader yielding context inputs and parameter targets.}
 
@@ -67,7 +67,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   y <- matrix(rnorm(40), ncol = 2)
 
   loader <- probotDataLoader(x, y, batch = 5, shuffle = FALSE)
-  model <- probotNetworkFlow(dim_theta = 2, dim_x = 3)()
+  model <- probotMakeFlow(dim_theta = 2, dim_x = 3)()
   opt <- torch::optim_adam(model$parameters, lr = 0.01)
 
   metrics <- probotSingleEpochFlow(

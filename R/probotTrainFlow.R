@@ -9,8 +9,8 @@ probotSingleEpochFlow <- function(model,
     optimizer$zero_grad()
 
     current_loss <- loss_fn(
-      true_theta = batch[[2]],
-      context_x = batch[[1]],
+      output_true = batch[[2]],
+      output_pred = batch[[1]],
       model = model
     )
 
@@ -25,7 +25,7 @@ probotSingleEpochFlow <- function(model,
   )
 }
 
-probotMultiEpochFlow <- function(model,
+probotTrainFlow <- function(model,
                                  dataloader,
                                  optimizer,
                                  epochs = 100,

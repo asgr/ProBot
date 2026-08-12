@@ -33,18 +33,11 @@ probotLossMDN <- function(
   -log_mix_prob$mean()
 }
 
-probotLossNF <- function(true_theta, context_x, model, device = NULL) {
-  # true_theta: (Batch, D) - The 'true' parameters from your simulation
-  # context_x:   (Batch, C) - The observed data / conditioning variables
+probotLossNF <- function(output_true, output_pred, model) {
+  # output_true: (Batch, D) - The 'true' parameters from your simulation
+  # output_pred:   (Batch, C) - The observed data / conditioning variables
   
-  if (is.null(device)) {
-    device <- if (length(model$parameters) > 0) model$parameters[[1]]$device else torch_device("cpu")
-  }
-  
-  true_theta <- true_theta$to(device = device)
-  context_x <- context_x$to(device = device)
-  
-  out <- model$forward(true_theta, context_x)
+  out <- model$forward(output_true, output_pred)
   z <- out$z
   log_det_jac <- out$log_det_jac
   

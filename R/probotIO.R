@@ -84,7 +84,7 @@ probotLoadModel <- function(
    }
 
   if (is.null(checkpoint$metadata)) {
-    warning("Checkpoint has no 'metadata' block — may be from an older version")
+    warning("Checkpoint has no 'metadata' block - may be from an older version")
    }
 
   if (!is.null(model_skeleton)) {

@@ -60,13 +60,13 @@ probotTARP(
     Defaults to \code{1e4}.}
 
   \item{col_means}{Centering values used for back-transforming MDN output,
-    as returned by \code{\link{probotScaleForward()}().}}
+    as returned by \code{\link{probotScaleForward}}.}
 
   \item{col_sds}{Scale values used for back-transforming MDN output,
-    as returned by \code{\link{probotScaleForward()}().}}
+    as returned by \code{\link{probotScaleForward}}.}
 
   \item{col_names}{Optional character vector of parameter names. For
-    \code{probotCRPS()} and \code{probotPIT()}, assigned as column names
+    \code{probotCRPS} and \code{probotPIT}, assigned as column names
     of the returned matrix. For \code{probotTARP()}, passed through to
     \code{\link{probotSamplePostMDN}().}}
 

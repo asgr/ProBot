@@ -1,16 +1,19 @@
 \name{probotLoss}
 \alias{probotLoss}
 \alias{probotLossMDN}
+\alias{probotLossNF}
 \alias{probotLossMSE}
 \alias{probotLossMAE}
 \alias{probotLossMAPE}
 \alias{probotLossHuber}
 \title{Compute Loss Values for an MDN Output}
 \description{
-Compute loss values from Mixture Density Network (MDN) outputs. \code{probotLossMDN} computes mean negative log-likelihood of targets under a Gaussian mixture. \code{probotLossMSE} computes Mean Squared Error. \code{probotLossMAE} computes Mean Absolute Error. \code{probotLossMAPE} computes Mean Absolute Percentage Error (as a percentage). \code{probotLossHuber} computes the Huber loss.
+Compute loss values for different networks. \code{probotLossMDN} computes mean negative log-likelihood of targets under a Gaussian mixture. \code{probotLossFlow} computes the negative log likelihood loss for training a normalizing flow model. \code{probotLossMSE} computes Mean Squared Error. \code{probotLossMAE} computes Mean Absolute Error. \code{probotLossMAPE} computes Mean Absolute Percentage Error (as a percentage). \code{probotLossHuber} computes the Huber loss.
 }
 \usage{
 probotLossMDN(output_true, output_pred, mdn_components)
+
+probotLossNF(output_true, output_pred, model)
 
 probotLossMSE(output_true, output_pred, mdn_components)
 
@@ -27,6 +30,8 @@ probotLossHuber(output_true, output_pred, mdn_components, delta = 1.0)
   \item{output_pred}{Torch tensor of raw MDN outputs from the network.}
 
   \item{mdn_components}{Number of Gaussian mixture components used by the model.}
+  
+  \item{model}{The flow model to use (see \code{\link{probotMakeFlow}}) to compute loss.}
 
   \item{delta}{Threshold for the Huber loss: errors below \code{delta} are penalized quadratically, errors above are penalized linearly. Only used by \code{probotLossHuber}. Default is 1.0.}
 }
@@ -46,7 +51,7 @@ Aaron Robotham
 if (requireNamespace("torch", quietly = TRUE)) {
   torch::torch_manual_seed(1)
 
-  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
+  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2, device='cpu')()
   x <- torch::torch_randn(c(4, 2))
   y <- torch::torch_randn(c(4, 1))
 

@@ -2,9 +2,7 @@
 \alias{probotPredictMDN}
 \title{Generate MDN Predictions from a Trained Model}
 \description{
-Pass input features through a trained MDN and unpack the raw network output into
-separate \code{logits}, \code{mu}, and \code{log10_sigma} tensors for downstream
-sampling or evaluation.
+Pass input features through a trained MDN and unpack the raw network output into separate \code{logits}, \code{mu}, and \code{log10_sigma} tensors for downstream sampling or evaluation.
 }
 \usage{
 probotPredictMDN(input, model, mdn_components, device = NULL)
@@ -23,7 +21,7 @@ probotPredictMDN(input, model, mdn_components, device = NULL)
 }
 \details{
 The model is set to evaluation mode (\code{\link[torch]{model$eval()}}) and predictions
-are computed inside a \code{\link[torch]{with_no_grad()}} block. The raw network output
+are computed inside a \code{\link[torch]{with_no_grad}} block. The raw network output
 is unpacked by the internal \code{.probotUnpackMDN()} helper.
 
 When \code{device = NULL} (default), the input tensor is automatically placed on the

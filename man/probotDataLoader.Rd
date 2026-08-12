@@ -12,7 +12,7 @@ probotDataLoader(
   batch = 1024,
   shuffle = TRUE,
   train_idx = NULL,
-  device = "cpu"
+  device = NULL
 )
 }
 \arguments{
@@ -26,9 +26,7 @@ probotDataLoader(
 
    \item{train_idx}{Optional integer indices selecting rows to include in the loader.}
 
-   \item{device}{Character string specifying the computing device for tensor
-     allocation: \code{"cpu"} (default), \code{"cuda"}, or \code{"mps"} for
-     Apple Silicon GPUs. Tensors are created directly on this device.}
+   \item{device}{Character string specifying the computing device for tensor allocation: \code{"cpu"} (default), \code{"cuda"}, or \code{"mps"} for Apple Silicon GPUs. Tensors are created directly on this device.}
 }
 \details{
 If \code{train_idx} is \code{NULL}, all rows are used.

@@ -5,8 +5,7 @@
 
 # --- 1. Coupling Layer Definition ---
 
-probotCouplingLayer <- function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=4,
-                                device = NULL) {
+probotCouplingLayer <- function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=3, device = NULL) {
   nn_module(
     initialize = function() {
       self$dim_theta <- dim_theta
@@ -103,8 +102,7 @@ probotCouplingLayer <- function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=4,
 
 # --- 2. Flow Network Definition ---
 
-probotNetworkFlow <-  function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
-                               soft_clamp = 4, device = NULL) {
+probotMakeFlow <-  function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 3, device = NULL) {
   nn_module(
     initialize = function() {
       self$n_layers <- n_layers

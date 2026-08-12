@@ -1,5 +1,5 @@
-\name{probotNetworkFlow}
-\alias{probotNetworkFlow}
+\name{probotMakeFlow}
+\alias{probotMakeFlow}
 \title{Construct a Normalizing Flow Network Module}
 \description{
 Construct an \code{\link[torch]{nn_module}} implementing a stack of coupling layers
@@ -7,7 +7,8 @@ Construct an \code{\link[torch]{nn_module}} implementing a stack of coupling lay
 maps parameters to a latent space (forward) and vice versa (inverse).
 }
 \usage{
-probotNetworkFlow(dim_theta, dim_x, n_layers = 4, hidden_dim = 32)
+probotMakeFlow(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 4,   
+  device = NULL)
 }
 \arguments{
     \item{dim_theta}{Total dimensionality of the parameter space.}
@@ -16,8 +17,11 @@ probotNetworkFlow(dim_theta, dim_x, n_layers = 4, hidden_dim = 32)
 
     \item{n_layers}{Number of coupling layers to stack. Defaults to 4.}
 
-    \item{hidden_dim}{Number of units in each hidden layer of the internal shift/scale network
-   within each coupling layer. Defaults to 32.}
+    \item{hidden_dim}{Number of units in each hidden layer of the internal shift/scale network within each coupling layer. Defaults to 32.}
+    
+    \item{soft_clamp}{Encourages narrower posteriors for larger values. Should probably be between 1-5.}
+    
+    \item{device}{Character specifying the computing device: \code{"cpu"}, \code{"cuda"}, or \code{"mps"}. If \code{NULL} (default), the device is automatically inferred from \code{model}; if the model has no parameters, falls back to \code{"mps"} if available otherwise \code{"cpu"}.}
 }
 \details{
 The network registers \code{n_layers} coupling layers directly, so parameters are
@@ -41,7 +45,7 @@ Aaron Robotham
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
 ## Create a flow network with 4 coupling layers
-flow <- probotNetworkFlow(dim_theta = 2, dim_x = 3)
+flow <- probotMakeFlow(dim_theta = 2, dim_x = 3, device='cpu')()
 
 ## Forward and inverse passes require torch tensors
 theta <- torch::torch_randn(c(10, 2))
