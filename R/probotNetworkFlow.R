@@ -14,7 +14,9 @@ probotCouplingLayer <- function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=3,
       # Split parameter space in half for coupling
       self$d1 <- floor(dim_theta / 2)
       self$d2 <- dim_theta - self$d1
-      
+      if (self$d1 < 1 || self$d2 < 1) {
+        stop("'dim_theta' must be >= 2 for probotCouplingLayer() (got ", dim_theta, ")", call. = FALSE)
+      }
       # Input to the shift/scale network is (first_half_of_theta + context_x)
       input_dim <- self$d1 + dim_x
       
