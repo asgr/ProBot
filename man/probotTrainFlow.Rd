@@ -23,7 +23,7 @@ probotTrainFlow(model, dataloader, optimizer, epochs = 100,
 
   \item{loss_fn}{Loss function to use for optimisation.}
 
-  \item{epochs}{Maximum number of epochs for \code{probotMultiEpochFlow()}.}
+  \item{epochs}{Maximum number of epochs for \code{probotTrainFlow()}.}
 
   \item{checkpoint_dir}{Optional directory to save periodic \code{.pt} checkpoints.}
 
