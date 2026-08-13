@@ -54,7 +54,8 @@ probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components,
     mae = running_mae / length(dataloader$dataset),
     rmse = sqrt(running_rmse / length(dataloader$dataset)),
     sigma = running_sigma / n_batches,
-    mix = running_mix / n_batches
+    mix = running_mix / n_batches,
+    mix_sd = sd(running_mix / n_batches)
   )
 }
 
