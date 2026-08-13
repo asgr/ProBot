@@ -1,4 +1,4 @@
-\name{probotSingleEpochMDN}
+\name{probotTrainMDN}
 \alias{probotSingleEpochMDN}
 \alias{probotTrainMDN}
 \title{Train Mixture Density Networks for One Epoch or Many}

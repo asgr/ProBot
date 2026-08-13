@@ -8,21 +8,22 @@ distribution and transformed through the inverse flow.
 }
 \usage{
 probotSamplePostNF(
-  context_x,
+  input,
   model,
   n_samples = 5000,
   col_means = NULL,
   col_sds = NULL,
   col_names = NULL,
-  dim_theta = NULL
+  dim_theta = NULL,
+  device = NULL
 )
 }
 \arguments{
-   \item{context_x}{Torch tensor of context/input features. Can be 1D (single observation)
-   or 2D (\eqn{Batch \times C}).}
+   \item{input}{Numeric vector or matrix (single observation), or a torch tensor.
+   Accepts raw R vectors/matrices which are automatically converted to tensors.}
 
    \item{model}{An instantiated normalizing flow \code{\link[torch]{nn_module}} object
-   (e.g., from \code{\link[=probotNetworkFlow]{probotNetworkFlow()}}). The model is set
+   (e.g., from \code{\link{probotMakeFlow}}). The model is set
    to evaluation mode automatically.}
 
    \item{n_samples}{Number of posterior samples to draw. Defaults to 5000.}
@@ -39,18 +40,22 @@ probotSamplePostNF(
    \item{dim_theta}{Integer specifying the parameter dimensionality. Only needed when
    \code{col_means} is \code{NULL} (i.e., when no scaling is applied). If both
    \code{dim_theta} and \code{col_means} are \code{NULL}, the function throws an error.}
+
+   \item{device}{Torch device string (e.g., "cpu", "mps"). Defaults to \code{NULL},
+   which auto-detects from the model's parameters.}
 }
 \details{
-The model is set to evaluation mode (\code{\link[torch]{model$eval()}}) and all
-transformations are computed inside a \code{\link[torch]{with_no_grad()}} block
+The model is set to evaluation mode (\code{model$eval()}) and all
+transformations are computed inside a \code{\link[torch]{with_no_grad}} block
 to avoid unnecessary memory allocations.
 
-If \code{context_x} is 1D, it is expanded to match \code{n_samples} rows so that
-each sample is conditioned on the same observed data. If \code{context_x} already
-has \code{n_samples} rows, it is used as-is.
+If \code{input} is an R vector or matrix, it is automatically converted to a
+torch tensor and placed on the same device as the model. If \code{input} is
+1D, it is expanded to match \code{n_samples} rows so that each sample is
+conditioned on the same observed data.
 
 When \code{col_means} is provided, the sampled parameters are automatically
-unstandardized using \code{\link[=probotScaleBackward]{probotScaleBackward()}},
+unstandardized using \code{\link{probotScaleBackward}},
 which reverses the scaling applied during training.
 }
 \value{
@@ -61,16 +66,14 @@ of parameters. Column names are set from \code{col_names} if provided.
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotNetworkFlow}}, \code{\link{probotLossNF}},
+\code{\link{probotMakeFlow}}, \code{\link{probotLossNF}},
 \code{\link{probotScaleBackward}}, \code{\link{probotSamplePostMDN}}
 }
 \examples{
 \dontrun{
-## Sample posterior from a trained flow model
-x <- torch::torch_tensor(c(1.2, 0.5))
-
+## Sample posterior from a trained flow model, passing a plain R vector
 samples <- probotSamplePostNF(
-  context_x = x,
+  input = c(1.2, 0.5),
   model = flow_model,
   n_samples = 5000,
   col_means = c(mean1, mean2),

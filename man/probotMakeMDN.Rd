@@ -31,12 +31,9 @@ probotMakeMDN(
      Defaults to \code{\link[torch]{nnf_relu}}. Also accepts \code{\link[torch]{nnf_silu}} or
      \code{\link[torch]{nnf_gelu}}.}
 
-    \item{dropout}{Dropout rate (fraction of activations to zero out during training).
-     Defaults to 0 (no dropout).}
+    \item{dropout}{Dropout rate (fraction of activations to zero out during training). Defaults to 0 (no dropout).}
 
-    \item{device}{Character string specifying the computing device: \code{"cpu"},
-     \code{"cuda"}, or \code{"mps"}. If \code{NULL} (default), auto-detects
-     \code{"mps"} on Apple Silicon systems, otherwise falls back to \code{"cpu"}}
+    \item{device}{Character string specifying the computing device: \code{"cpu"}, \code{"cuda"}, or \code{"mps"}. If \code{NULL} (default), auto-detects \code{"mps"} on Apple Silicon systems, otherwise falls back to \code{"cpu"}}
 }
 \details{
 The final output layer has \code{mdn_components * (2 * output_dim + 1)} units,
@@ -47,7 +44,7 @@ When \code{device = NULL}, the network attempts to use MPS (Apple GPU accelerati
 available, otherwise falls back to CPU. Pass an explicit device string to override.
 }
 \value{
-An \code{\link[torch]{nn_module_class}} that must be called as a function
+An \code{\link[torch]{nn_module}} that must be called as a function
 (e.g., \code{probotMakeMDN(2, 2, 3)()}) to instantiate the model object.
 }
 \author{
@@ -59,15 +56,7 @@ Aaron Robotham
 \examples{
 \dontrun{
 ## Create and inspect model on default device (auto-detected)
-model_fn <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3)
-model <- model_fn()
-
-## Explicitly place on GPU/MPS
-model_gpu <- probotMakeMDN(
-  input_dim = 2,
-  output_dim = 2,
-  mdn_components = 3,
-  device = "mps"
-)()
+## Note the explicit () required to trigger model creation
+model <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3, device = "cpu")()
 }
 }

@@ -1,16 +1,19 @@
 \name{probotLoss}
 \alias{probotLoss}
 \alias{probotLossMDN}
+\alias{probotLossNF}
 \alias{probotLossMSE}
 \alias{probotLossMAE}
 \alias{probotLossMAPE}
 \alias{probotLossHuber}
-\title{Compute Loss Values for an MDN Output}
+\title{Compute Loss Values for Model Outputs}
 \description{
-Compute loss values from Mixture Density Network (MDN) outputs. \code{probotLossMDN} computes mean negative log-likelihood of targets under a Gaussian mixture. \code{probotLossMSE} computes Mean Squared Error. \code{probotLossMAE} computes Mean Absolute Error. \code{probotLossMAPE} computes Mean Absolute Percentage Error (as a percentage). \code{probotLossHuber} computes the Huber loss.
+Compute loss values for different network types. \code{probotLossMDN} computes mean negative log-likelihood of targets under a Gaussian mixture. \code{probotLossNF} computes the negative log likelihood loss for training a normalizing flow model. \code{probotLossMSE} computes Mean Squared Error. \code{probotLossMAE} computes Mean Absolute Error. \code{probotLossMAPE} computes Mean Absolute Percentage Error (as a percentage). \code{probotLossHuber} computes the Huber loss.
 }
 \usage{
 probotLossMDN(output_true, output_pred, mdn_components)
+
+probotLossNF(output_true, output_pred, model)
 
 probotLossMSE(output_true, output_pred, mdn_components)
 
@@ -28,10 +31,27 @@ probotLossHuber(output_true, output_pred, mdn_components, delta = 1.0)
 
   \item{mdn_components}{Number of Gaussian mixture components used by the model.}
 
+  \item{model}{The normalizing flow model (from \code{\link{probotMakeFlow}})
+  used to compute the forward transformation and Jacobian. For \code{probotLossNF},
+  \code{output_true} is the parameters tensor (\code{batch x D}) and
+  \code{output_pred} is the conditioning data (\code{batch x C}).}
+
   \item{delta}{Threshold for the Huber loss: errors below \code{delta} are penalized quadratically, errors above are penalized linearly. Only used by \code{probotLossHuber}. Default is 1.0.}
 }
 \details{
-All functions unpack the raw network output into predicted means, scales, and mixture logits using an internal helper. For \code{probotLossMDN}, numerically stable log-sum-exp aggregation over components yields the mean negative log-likelihood. For \code{probotLossMSE}, \code{probotLossMAE}, \code{probotLossMAPE}, and \code{probotLossHuber}, the predicted mixture-mean (weighted average of component means) is compared to the true targets using squared error, absolute error, absolute percentage error, or Huber loss respectively.
+The MDN family of loss functions (\code{probotLossMDN}, \code{probotLossMSE},
+\code{probotLossMAE}, \code{probotLossMAPE}, \code{probotLossHuber}) all unpack
+the raw network output into predicted means, scales, and mixture logits using
+an internal helper. For \code{probotLossMDN}, numerically stable log-sum-exp
+aggregation over components yields the mean negative log-likelihood.
+For \code{probotLossMSE}, \code{probotLossMAE}, \code{probotLossMAPE}, and
+\code{probotLossHuber}, the predicted mixture-mean (weighted average of
+component means) is compared to the true targets using squared error,
+absolute error, absolute percentage error, or Huber loss respectively.
+
+\code{probotLossNF} applies the flow's forward transformation to map parameters
+to latent space and combines the base Gaussian log-likelihood with the
+log-determinant of the Jacobian to give the exact parameter log-likelihood.
 }
 \value{
 A scalar torch tensor containing the loss value.
@@ -40,19 +60,27 @@ A scalar torch tensor containing the loss value.
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotMakeMDN}}, \code{\link{probotSingleEpochMDN}}
+\code{\link{probotMakeMDN}}, \code{\link{probotMakeFlow}}, \code{\link{probotSingleEpochMDN}}, \code{\link{probotSingleEpochFlow}}
 }
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
   torch::torch_manual_seed(1)
 
-  model <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2)()
+  ## MDN loss
+  model_mdn <- probotMakeMDN(input_dim = 2, output_dim = 1, mdn_components = 2, device = "cpu")()
   x <- torch::torch_randn(c(4, 2))
   y <- torch::torch_randn(c(4, 1))
 
-  pred <- model(x)
-  loss <- probotLossMDN(y, pred, mdn_components = 2)
+  pred <- model_mdn(x)
+  loss_mdn <- probotLossMDN(y, pred, mdn_components = 2)
+  as.numeric(loss_mdn$item())
 
-  as.numeric(loss$item())
+  ## Flow loss
+  model_nf <- probotMakeFlow(dim_theta = 2, dim_x = 3, n_layers = 2, device = "cpu")()
+  theta <- torch::torch_randn(c(4, 2), device = "cpu")
+  ctx <- torch::torch_randn(c(4, 3), device = "cpu")
+
+  loss_nf <- probotLossNF(theta, ctx, model_nf)
+  as.numeric(loss_nf$item())
 }
 }
