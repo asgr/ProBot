@@ -18,11 +18,7 @@ probotMakeMDN <- function(input_dim, output_dim, mdn_components,
       self$layers <- nn_module_list(layer_list)
       
       #Determine device: Use provided device, or auto-detect MPS / CPU fallback
-      if (is.null(device)) {
-        target_device <- if (backends_mps_is_available()) torch_device("mps") else torch_device("cpu")
-      } else {
-        target_device <- torch_device(device)
-      }
+      target_device <- .probotChooseDevice(device)
       
       # 3. CRITICAL: Automatically move the entire module structure to the target hardware
       self$to(device = target_device)

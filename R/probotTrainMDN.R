@@ -148,7 +148,7 @@ probotTrainMDN <- function(model,
         ),
         file.path(
           checkpoint_dir,
-          sprintf("mdn_checkpoint_epoch_%03d.pt", epoch)
+          sprintf("mdn_epoch_%03d.pt", epoch)
         )
       )
     }

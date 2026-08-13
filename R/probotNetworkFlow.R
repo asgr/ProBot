@@ -28,11 +28,7 @@ probotCouplingLayer <- function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=3,
       )
       
       #Determine device: Use provided device, or auto-detect MPS / CPU fallback
-      if (is.null(device)) {
-        target_device <- if (backends_mps_is_available()) torch_device("mps") else torch_device("cpu")
-      } else {
-        target_device <- torch_device(device)
-      }
+      target_device <- .probotChooseDevice(device)
       
       # 3. CRITICAL: Automatically move the entire module structure to the target hardware
       self$to(device = target_device)
@@ -114,11 +110,7 @@ probotMakeFlow <-  function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, sof
       }
       
       #Determine device: Use provided device, or auto-detect MPS / CPU fallback
-      if (is.null(device)) {
-        target_device <- if (backends_mps_is_available()) torch_device("mps") else torch_device("cpu")
-      } else {
-        target_device <- torch_device(device)
-      }
+      target_device <- .probotChooseDevice(device)
       
       # 3. CRITICAL: Automatically move the entire module structure to the target hardware
       self$to(device = target_device)

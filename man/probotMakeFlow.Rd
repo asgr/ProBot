@@ -7,7 +7,7 @@ Construct an \code{\link[torch]{nn_module}} implementing a stack of coupling lay
 maps parameters to a latent space (forward) and vice versa (inverse).
 }
 \usage{
-probotMakeFlow(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 4,   
+probotMakeFlow(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 3,   
   device = NULL)
 }
 \arguments{
@@ -15,7 +15,7 @@ probotMakeFlow(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 4,
 
     \item{dim_x}{Dimensionality of the context/input features used to condition the flow.}
 
-    \item{n_layers}{Number of coupling layers to stack. Defaults to 4.}
+    \item{n_layers}{Number of coupling layers to stack. Defaults to 3.}
 
     \item{hidden_dim}{Number of units in each hidden layer of the internal shift/scale network within each coupling layer. Defaults to 32.}
     

@@ -81,7 +81,7 @@ probotTrainPoint <- function(model,
           optimizer = optimizer$state_dict(),
           loss = metrics$loss
         ),
-        file.path(checkpoint_dir, sprintf("point_checkpoint_epoch_%03d.pt", epoch))
+        file.path(checkpoint_dir, sprintf("point_epoch_%03d.pt", epoch))
       )
     }
   }

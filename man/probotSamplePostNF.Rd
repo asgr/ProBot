@@ -22,7 +22,7 @@ probotSamplePostNF(
    or 2D (\eqn{Batch \times C}).}
 
    \item{model}{An instantiated normalizing flow \code{\link[torch]{nn_module}} object
-   (e.g., from \code{\link[=probotNetworkFlow]{probotNetworkFlow()}}). The model is set
+   (e.g., from \code{\link{probotMakeFlow}}). The model is set
    to evaluation mode automatically.}
 
    \item{n_samples}{Number of posterior samples to draw. Defaults to 5000.}
@@ -61,7 +61,7 @@ of parameters. Column names are set from \code{col_names} if provided.
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotNetworkFlow}}, \code{\link{probotLossNF}},
+\code{\link{probotMakeFlow}}, \code{\link{probotLossNF}},
 \code{\link{probotScaleBackward}}, \code{\link{probotSamplePostMDN}}
 }
 \examples{

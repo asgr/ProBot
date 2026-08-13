@@ -66,7 +66,7 @@ probotTrainFlow <- function(model,
           cat(sprintf(
             paste0(
               "\nEarly stopping at epoch %d: ",
-              "average loss changed by %.6f ",
+              "average loss improved by only %.6f ",
               "over the last %d epochs ",
               "(threshold = %.6f)\n\n"
             ),
@@ -84,7 +84,7 @@ probotTrainFlow <- function(model,
 
     if (!is.null(checkpoint_dir) &&
         epoch %% checkpoint_every == 0) {
-      torch::torch_save(
+      torch_save(
         list(
           epoch = epoch,
           model = model$state_dict(),
@@ -93,7 +93,7 @@ probotTrainFlow <- function(model,
         ),
         file.path(
           checkpoint_dir,
-          sprintf("flow_checkpoint_epoch_%03d.pt", epoch)
+          sprintf("flow_epoch_%03d.pt", epoch)
         )
       )
     }

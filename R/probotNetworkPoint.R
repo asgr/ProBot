@@ -19,11 +19,7 @@ probotMakePoint <- function(input_dim, output_dim,
       
       self$layers <- nn_module_list(layer_list)
       
-      if (is.null(device)) {
-        target_device <- if (backends_mps_is_available()) torch_device("mps") else torch_device("cpu")
-      } else {
-        target_device <- torch_device(device)
-      }
+      target_device <- .probotChooseDevice(device)
       
       self$to(device = target_device)
     },

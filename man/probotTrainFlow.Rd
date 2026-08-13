@@ -57,7 +57,7 @@ Aaron Robotham
 }
 \seealso{
 \code{\link{probotDataLoader}}, \code{\link{probotLossNF}},
-\code{\link{probotNetworkFlow}}, \code{\link{probotSamplePostNF}}
+\code{\link{probotMakeFlow}}, \code{\link{probotSamplePostNF}}
 }
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
