@@ -1,4 +1,5 @@
 \name{probotIO}
+\alias{probotIO}
 \alias{probotSave}
 \alias{probotLoadModel}
 \alias{probotLoad}
@@ -110,9 +111,9 @@ single \code{.pt} file. The \code{model_type} argument determines which
 metadata fields are required for auto-reconstruction:
 
 \describe{
-  \item{\code{"mdn"}}:{ requires \code{mdn_components}, \code{input_dim}, \code{output_dim} }
-  \item{\code{"point"}}:{ requires \code{input_dim}, \code{output_dim} }
-  \item{\code{"flow"}}:{ requires \code{dim_theta}, \code{dim_x} }
+  \item{\code{"mdn"}}{requires \code{mdn_components}, \code{input_dim}, \code{output_dim}}
+  \item{\code{"point"}}{requires \code{input_dim}, \code{output_dim}}
+  \item{\code{"flow"}}{requires \code{dim_theta}, \code{dim_x}}
 }
 
 When required metadata is missing, \code{probotSave()} issues a warning that
