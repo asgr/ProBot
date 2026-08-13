@@ -124,7 +124,7 @@ output_scaled <- probotScaleForward(poly_train$output)
 input_scaled  <- probotScaleForward(theta_train)
 ```
 
-The flow is trained using `probotMultiEpochFlow()`, which leverages a `probotDataLoader`
+The flow is trained using `probotTrainFlow()`, which leverages a `probotDataLoader`
 to handle mini-batching and device placement efficiently.
 
 ```{r build-tensors, eval = eval_global}
