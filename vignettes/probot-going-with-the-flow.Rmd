@@ -145,7 +145,7 @@ flow_dataloader <- probotDataLoader(
 - `hidden_dim` — width of the shift/scale network inside each coupling layer.
 
 ```{r build-flow, eval = eval_global}
-flow_model <- probotNetworkFlow(
+flow_model <- probotMakeFlow(
   dim_theta  = ncol(theta_train),
   dim_x      = ncol(poly_train$output),
   n_layers   = 6,
@@ -161,7 +161,7 @@ loop and includes optional features like early stopping.
 ```{r train-flow, eval = eval_global}
 flow_optimizer <- optim_adam(flow_model$parameters, lr = 3e-4)
 
-train_result <- probotMultiEpochFlow(
+train_result <- probotTrainFlow(
   model     = flow_model,
   dataloader = flow_dataloader,
   optimizer = flow_optimizer,

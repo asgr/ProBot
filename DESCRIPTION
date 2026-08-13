@@ -12,8 +12,9 @@ Authors@R: c(
 Description: Simplified Interface to Torch for Simulation Based Inference. Roughly Professional Bayesian Operations Toolkit for 'ProBot'.
 License: LGPL-3
 Depends: R (>= 4.0.0)
-Imports: torch, collapse
+Imports: torch, collapse, coro
 Encoding: UTF-8
 LazyData: true
-Suggests: knitr, rmarkdown, magicaxis
+Suggests: knitr, rmarkdown, magicaxis, testthat (>= 3.0.0)
 VignetteBuilder: knitr
+Config/testthat/edition: 3
