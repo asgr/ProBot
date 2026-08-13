@@ -34,9 +34,9 @@ probotLossMDN <- function(
 }
 
 probotLossNF <- function(output_true, output_pred, model) {
-  # output_true: (Batch, D) - The 'true' parameters from your simulation
-  # output_pred:   (Batch, C) - The observed data / conditioning variables
-  
+  # output_true: (Batch, D) - The true parameters from your simulation
+  # output_pred: (Batch, C) - The observed data / conditioning variables
+
   out <- model$forward(output_true, output_pred)
   z <- out$z
   log_det_jac <- out$log_det_jac

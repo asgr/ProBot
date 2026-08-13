@@ -5,57 +5,86 @@
 \title{Save and Load Model Checkpoints}
 \description{
 Save trained models to disk with metadata, and load them back with full
-reconstruction or into an explicit model skeleton.
+auto-reconstruction or into an explicit model skeleton. Supports MDN, Point,
+and Normalizing Flow models.
 }
 \usage{
 probotSave(
   model,
   optimizer = NULL,
   filename = "temp.pt",
+  model_type = "mdn",
   mdn_components = NULL,
   input_dim = NULL,
   output_dim = NULL,
+  dim_theta = NULL,
+  dim_x = NULL,
+  n_layers = NULL,
+  hidden_dim = NULL,
   hidden_dims = NULL,
   activation_name = NULL,
   dropout = NULL,
+  soft_clamp = NULL,
   col_means = NULL,
   col_sds = NULL,
   training_history = NULL,
-  ...
+  extra_metadata = list()
 )
 
 probotLoadModel(
   filename,
   model_skeleton = NULL,
   load_optimizer = FALSE,
-  device = "cpu"
+  device = NULL
 )
 
 probotLoad(
   filename,
   load_optimizer = FALSE,
-  device = "cpu"
+  device = NULL
 )
 }
 \arguments{
-    \item{model}{An nn_module object (MDN model).}
+    \item{model}{An nn_module object (MDN, Point, or Flow model).}
 
     \item{optimizer}{Optional optimizer state dict to save alongside the model.}
 
     \item{filename}{Path to save or load the checkpoint file.}
 
-    \item{mdn_components}{Number of MDN mixture components; saved for later reconstruction.}
+    \item{model_type}{Character string identifying the model type:
+    \code{"mdn"}, \code{"point"}, or \code{"flow"}. Determines which metadata
+    fields are required for auto-reconstruction.}
 
-    \item{input_dim}{Dimension of the input layer; saved for later reconstruction.}
+    \item{mdn_components}{Number of MDN mixture components. Required for
+    \code{model_type = "mdn"}.}
 
-    \item{output_dim}{Dimension of the output layer; saved for later reconstruction.}
+    \item{input_dim}{Dimension of the input layer. Required for MDN and Point models.}
 
-    \item{hidden_dims}{Numeric vector of hidden layer sizes; optional metadata for reconstruction.}
+    \item{output_dim}{Dimension of the output layer. Required for MDN and Point models.}
+
+    \item{dim_theta}{Dimensionality of the parameter space. Required for
+    \code{model_type = "flow"}.}
+
+    \item{dim_x}{Dimensionality of the conditioning context. Required for
+    \code{model_type = "flow"}.}
+
+    \item{n_layers}{Number of coupling layers. Used for Flow model
+    reconstruction (defaults to 4 if not saved).}
+
+    \item{hidden_dim}{Width of the shift/scale network inside each coupling layer.
+    Used for Flow model reconstruction (defaults to 32 if not saved).}
+
+    \item{hidden_dims}{Numeric vector of hidden layer sizes. Used for MDN and
+    Point reconstruction (defaults to \code{c(128, 256, 256)} if not saved).}
 
     \item{activation_name}{Character name of activation function (\code{"relu"},
-     \code{"silu"}, or \code{"gelu"}).}
+    \code{"silu"}, or \code{"gelu"}). Used for MDN and Point reconstruction.}
 
-    \item{dropout}{Dropout rate used in the model; saved as metadata.}
+    \item{dropout}{Dropout rate used in the model. Used for MDN and Point
+    reconstruction (defaults to 0 if not saved).}
+
+    \item{soft_clamp}{Soft-clamp value for Flow log_scale (defaults to 3 if
+    not saved).}
 
     \item{col_means}{Centering values from \code{\link{probotScaleForward}}(); saved as metadata.}
 
@@ -63,32 +92,44 @@ probotLoad(
 
     \item{training_history}{Training history data frame; saved as metadata.}
 
-    \item{...}{Additional fields to include in the checkpoint metadata block.}
+    \item{extra_metadata}{A named list of additional fields to include in the
+    checkpoint metadata block.}
 
     \item{model_skeleton}{Pre-instantiated model object to load state dict into.
-     If \code{NULL}, reconstruction from metadata is required (see \code{\link[=probotLoad]{probotLoad()}}).}
+    If \code{NULL}, reconstruction from metadata is required (see
+    \code{\link[=probotLoad]{probotLoad()}}).}
 
     \item{load_optimizer}{Logical; if \code{TRUE}, also restore the optimizer state.}
 
-    \item{device}{Character string specifying the computing device for loading
-     tensors: \code{"cpu"} (default), \code{"cuda"}, or \code{"mps"} for Apple
-     Silicon GPUs. Checkpoint tensors are loaded onto this device.}
+    \item{device}{Device string for tensor placement (\code{"cpu"}, \code{"mps"},
+    etc.). Defaults to \code{NULL}, which auto-detects MPS/CPU.}
 }
 \details{
 \code{probotSave()} stores model weights, optimizer state, and metadata in a
-single \code{.pt} file. When called without required metadata
-(\code{mdn_components}, \code{input_dim}, \code{output_dim}), it issues a
-warning that \code{\link[=probotLoad]{probotLoad()}} will be unable to auto-reconstruct
-the model.
+single \code{.pt} file. The \code{model_type} argument determines which
+metadata fields are required for auto-reconstruction:
+
+\describe{
+  \item{\code{"mdn"}}:{ requires \code{mdn_components}, \code{input_dim}, \code{output_dim} }
+  \item{\code{"point"}}:{ requires \code{input_dim}, \code{output_dim} }
+  \item{\code{"flow"}}:{ requires \code{dim_theta}, \code{dim_x} }
+}
+
+When required metadata is missing, \code{probotSave()} issues a warning that
+\code{\link[=probotLoad]{probotLoad()}} will be unable to auto-reconstruct the
+model.
 
 \code{probotLoadModel()} loads a checkpoint and requires an explicit
-\code{model_skeleton} for state restoration, unless the checkpoint was saved
-with full metadata (in which case \code{\link[=probotLoad]{probotLoad()}} should be used).
+\code{model_skeleton} for state restoration. Use this when you cannot (or do
+not want to) auto-reconstruct from metadata.
 
-\code{probotLoad()} automatically reconstructs the model architecture from saved
-metadata and loads weights. It requires that \code{mdn_components},
-\code{input_dim}, and \code{output_dim} were saved in the checkpoint. If these
-are missing, use \code{\link[=probotLoadModel]{probotLoadModel()}} with an explicit model skeleton instead.
+\code{probotLoad()} automatically reconstructs the model architecture from
+saved metadata and loads weights. It reads \code{model_type} from the
+checkpoint to decide which constructor to call. Old checkpoints that lack
+\code{model_type} default to \code{"mdn"} for backward compatibility.
+
+\code{probotLoadModel()} loads into an explicit model skeleton but does not
+require \code{model_type} metadata.
 }
 \value{
 \code{probotSave()} returns the filename invisibly.
@@ -100,15 +141,16 @@ are missing, use \code{\link[=probotLoadModel]{probotLoadModel()}} with an expli
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotMakeMDN}}, \code{\link{probotTrainMDN}}
+\code{\link{probotMakeMDN}}, \code{\link{probotMakePoint}}, \code{\link{probotMakeFlow}}
 }
 \examples{
 \dontrun{
-## Save a trained model
+## --- MDN model ---
 probotSave(
   fitted$model,
   optimizer = fitted$optimizer,
-  filename = "my_model.pt",
+  filename = "my_mdn.pt",
+  model_type = "mdn",
   mdn_components = 3,
   input_dim = 2,
   output_dim = 2,
@@ -116,10 +158,30 @@ probotSave(
   col_sds = c(1, 1)
 )
 
-## Load and auto-reconstruct
-loaded <- probotLoad("my_model.pt")
+loaded <- probotLoad("my_mdn.pt")
 
-## Load onto GPU/MPS
-loaded_gpu <- probotLoad("my_model.pt", device = "mps")
+## --- Point model ---
+probotSave(
+  point_model,
+  filename = "my_point.pt",
+  model_type = "point",
+  input_dim = 3,
+  output_dim = 2
+)
+
+loaded_point <- probotLoad("my_point.pt", device = "mps")
+
+## --- Flow model ---
+probotSave(
+  flow_model,
+  filename = "my_flow.pt",
+  model_type = "flow",
+  dim_theta = 4,
+  dim_x = 3,
+  n_layers = 6,
+  hidden_dim = 64
+)
+
+loaded_flow <- probotLoad("my_flow.pt")
 }
 }
