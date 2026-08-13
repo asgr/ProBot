@@ -165,7 +165,7 @@ train_result <- probotTrainFlow(
   model     = flow_model,
   dataloader = flow_dataloader,
   optimizer = flow_optimizer,
-  epochs    = 100,
+  epochs    = 200,
   verbose   = TRUE
 )
 
@@ -213,18 +213,13 @@ output_test_scaled <- probotScaleForward(
 
 ```{r single-posterior, eval = eval_global}
 obs_idx <- 1
-context_obs <- torch_tensor(
-  output_test_scaled[obs_idx, , drop = FALSE],
-  dtype = torch_float()
-)$to(device = torch_device('mps'))
-
 post_samples <- probotSamplePostNF(
-  context_x  = context_obs,
-  model      = flow_model,
-  n_samples  = 5000,
-  col_means  = attr(input_scaled, "col_scale")$col_means,
-  col_sds    = attr(input_scaled, "col_scale")$col_sds,
-  col_names  = colnames(theta_train)
+  input    = output_test_scaled[obs_idx, , drop = FALSE],
+  model    = flow_model,
+  n_samples = 5000,
+  col_means = attr(input_scaled, "col_scale")$col_means,
+  col_sds   = attr(input_scaled, "col_scale")$col_sds,
+  col_names = colnames(theta_train)
 )
 
 head(post_samples)
@@ -256,14 +251,9 @@ post_mean <- matrix(NA_real_, n_eval, ncol(theta_test), dimnames = list(NULL, co
 post_sd   <- matrix(NA_real_, n_eval, ncol(theta_test), dimnames = list(NULL, colnames(theta_test)))
 
 for (i in seq_len(n_eval)) {
-  ctx_i <- torch_tensor(
-    output_test_scaled[i, , drop = FALSE],
-    dtype = torch_float()
-  )$to(device = torch_device('mps'))
-
   samp_i <- probotSamplePostNF(
-    context_x = ctx_i,
-    model     = flow_model,
+    input   = output_test_scaled[i, , drop = FALSE],
+    model   = flow_model,
     n_samples = 500,
     col_means = attr(input_scaled, "col_scale")$col_means,
     col_sds   = attr(input_scaled, "col_scale")$col_sds,
@@ -321,14 +311,9 @@ pit_nf <- matrix(NA_real_, n_pit, ncol(theta_test),
                  dimnames = list(NULL, colnames(theta_test)))
 
 for (i in seq_len(n_pit)) {
-  ctx_i <- torch_tensor(
-    output_test_scaled[i, , drop = FALSE],
-    dtype = torch_float()
-  )$to(device = torch_device('mps'))
-
   samp_i <- probotSamplePostNF(
-    context_x = ctx_i,
-    model     = flow_model,
+    input   = output_test_scaled[i, , drop = FALSE],
+    model   = flow_model,
     n_samples = n_samp_pit,
     col_means = attr(input_scaled, "col_scale")$col_means,
     col_sds   = attr(input_scaled, "col_scale")$col_sds,
@@ -367,14 +352,9 @@ n_samp_tarp <- 2000
 tarp_nf <- numeric(n_tarp)
 
 for (i in seq_len(n_tarp)) {
-  ctx_i <- torch_tensor(
-    output_test_scaled[i, , drop = FALSE],
-    dtype = torch_float()
-  )$to(device = torch_device('mps'))
-
   samp_i <- probotSamplePostNF(
-    context_x = ctx_i,
-    model     = flow_model,
+    input   = output_test_scaled[i, , drop = FALSE],
+    model   = flow_model,
     n_samples = n_samp_tarp,
     col_means = attr(input_scaled, "col_scale")$col_means,
     col_sds   = attr(input_scaled, "col_scale")$col_sds,
