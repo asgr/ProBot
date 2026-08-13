@@ -37,7 +37,7 @@ probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components,
     optimizer$step()
     
     # 5. Safe to detach for logging AFTER gradients are captured
-    running_loss <- running_loss + current_loss$item() * length(batch[[1]])
+    running_loss <- running_loss + current_loss$item() * batch[[1]]$size(1)
     running_mae <- running_mae + torch::torch_abs(batch[[2]] - mu_mix)$sum()$item()
     running_rmse <- running_rmse + ((batch[[2]] - mu_mix)^2)$sum()$item()
     
