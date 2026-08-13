@@ -137,7 +137,7 @@ flow_dataloader <- probotDataLoader(
 
 ### Constructing the flow network
 
-`probotNetworkFlow` accepts three key hyperparameters:
+`probotMakeFlow` accepts three key hyperparameters:
 
 - `dim_theta` — dimensionality of the parameter space (2 for `u` and `v`).
 - `dim_x` — dimensionality of the conditioning context (9 polynomial values).
