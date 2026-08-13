@@ -27,77 +27,33 @@ probotSingleEpochPoint <- function(model, dataloader, optimizer, loss_fn = nnf_m
 }
 
 probotTrainPoint <- function(model,
-                             dataloader,
-                             optimizer,
-                             epochs = 100,
-                             loss_fn = nnf_mse_loss,
-                             checkpoint_dir = NULL,
-                             checkpoint_every = 10,
-                             history = NULL,
-                             verbose = TRUE,
-                             early_stop = TRUE,
-                             stop_window = 20,
-                             stop_delta = 1e-2) {
-  history_list <- vector("list", epochs)
-  loss_history <- numeric()
-  
-  for (epoch in seq_len(epochs)) {
-    metrics <- probotSingleEpochPoint(
-      model = model,
-      dataloader = dataloader,
-      optimizer = optimizer,
-      loss_fn = loss_fn
-    )
-    
-    history_list[[epoch]] <- c(list(epoch = epoch), metrics)
-    loss_history <- c(loss_history, metrics$loss)
-    
-    if (verbose && (epoch %% checkpoint_every == 0 || epoch == 1)) {
-      cat(sprintf("Epoch %d Loss %.6f MAE %.6f RMSE %.6f\n",
-                  epoch, metrics$loss, metrics$mae, metrics$rmse))
-    }
-    
-    if (early_stop && length(loss_history) >= 2 * stop_window) {
-      recent_mean <- mean(tail(loss_history, stop_window))
-      previous_window <- tail(loss_history, 2 * stop_window)[seq_len(stop_window)]
-      previous_mean <- mean(previous_window)
-      improvement <- previous_mean - recent_mean
-      
-      if (improvement > 0 & improvement < stop_delta) {
-        if (verbose) {
-          cat(sprintf("\nEarly stopping at epoch %d: average loss improved by only %.6f over last %d epochs (threshold = %.6f)\n\n",
-                      epoch, improvement, stop_window, stop_delta))
-        }
-        history_list <- history_list[seq_len(epoch)]
-        break
-      }
-    }
-    
-    if (!is.null(checkpoint_dir) && epoch %% checkpoint_every == 0) {
-      torch_save(
-        list(
-          epoch = epoch,
-          model = model$state_dict(),
-          optimizer = optimizer$state_dict(),
-          loss = metrics$loss
-        ),
-        file.path(checkpoint_dir, sprintf("point_epoch_%03d.pt", epoch))
-      )
-    }
-  }
-  
-  history_df <- do.call(rbind, lapply(history_list, function(x) {
-    data.frame(
-      epoch = x$epoch,
-      loss = x$loss,
-      mae = x$mae,
-      rmse = x$rmse
-    )
-  }))
-  
-  if (!is.null(history)) {
-    history_df <- rbind(history, history_df)
-  }
-  
-  list(model = model, history = history_df)
+                              dataloader,
+                              optimizer,
+                              epochs = 100,
+                              loss_fn = nnf_mse_loss,
+                              checkpoint_dir = NULL,
+                              checkpoint_every = 10,
+                              history = NULL,
+                              verbose = TRUE,
+                              early_stop = TRUE,
+                              stop_window = 20,
+                              stop_delta = 1e-2) {
+  res <- .probotTrainLoop(
+    train_fn = probotSingleEpochPoint,
+    model = model,
+    dataloader = dataloader,
+    optimizer = optimizer,
+    epochs = epochs,
+    checkpoint_dir = checkpoint_dir,
+    checkpoint_every = checkpoint_every,
+    history = history,
+    verbose = verbose,
+    early_stop = early_stop,
+    stop_window = stop_window,
+    stop_delta = stop_delta,
+    checkpoint_prefix = "point",
+    loss_fn = loss_fn
+  )
+  # Ensure mae/rmse columns are present in history
+  res
 }

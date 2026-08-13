@@ -18,13 +18,14 @@
   early_stop = TRUE,
   stop_window = 20,
   stop_delta = 1e-2,
-  checkpoint_prefix = "checkpoint"
+  checkpoint_prefix = "checkpoint",
+  ...
 ) {
   history_list <- vector("list", epochs)
   loss_history <- numeric()
 
   for (epoch in seq_len(epochs)) {
-    metrics <- train_fn(model, dataloader, optimizer)
+    metrics <- train_fn(model, dataloader, optimizer, ...)
 
     # Normalise metrics to a list with at least loss
     if (is.list(metrics) && !is.null(metrics$loss)) {
@@ -38,9 +39,17 @@
     loss_history <- c(loss_history, loss_val)
 
     if (verbose && (epoch %% checkpoint_every == 0 || epoch == 1)) {
-      # Print loss if available
+      # Print loss and optional metrics
       if (!is.null(metrics$loss)) {
-        cat(sprintf("Epoch %d Loss %.6f\n", epoch, metrics$loss))
+        if (!is.null(metrics$mae) && !is.null(metrics$rmse) && !is.null(metrics$sigma) && !is.null(metrics$mix)) {
+          # MDN-style printing
+          cat(sprintf("Epoch %d Loss %.3f MAE %.3f RMSE %.3f Sigma %.3f MixSD %.3f Mix [%s]\n",
+                      epoch, metrics$loss, metrics$mae, metrics$rmse, metrics$sigma, sd(metrics$mix), paste(sprintf("%.2f", metrics$mix), collapse = " ")))
+        } else if (!is.null(metrics$mae) && !is.null(metrics$rmse)) {
+          cat(sprintf("Epoch %d Loss %.6f MAE %.6f RMSE %.6f\n", epoch, metrics$loss, metrics$mae, metrics$rmse))
+        } else {
+          cat(sprintf("Epoch %d Loss %.6f\n", epoch, metrics$loss))
+        }
       } else {
         cat(sprintf("Epoch %d\n", epoch))
       }
@@ -84,7 +93,7 @@
     for (nm in names(x)) {
       if (nm == "epoch") next
       val <- x[[nm]]
-      if (is.numeric(val)) {
+      if (is.numeric(val) && length(val) == 1) {
         df[[nm]] <- val
       }
     }

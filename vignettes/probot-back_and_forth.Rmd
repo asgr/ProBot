@@ -157,7 +157,7 @@ theta_test_scaled <- probotScaleForward(
 
 forward_pred <- probotPredictMDN(
   input = theta_test_scaled,
-  model = forward_fit$model,
+  model = forward_model,
   mdn_components = 3
 )
 
@@ -184,9 +184,11 @@ mean(abs(forward_summary$post_mean - poly_test$output))
 Rather than relying only on marginal summaries, we can draw samples directly from the joint predictive distribution for any single observation. This is the most faithful representation of what the MDN has learned.
 
 ```{r forward-samples, eval=eval_global}
+index = 1
+
 post_samples <- probotSamplePostMDN(
   mdn_output = forward_pred,
-  index = 1,
+  index = index,
   n_samples = 2000,
   col_means = attr(output_scaled, "col_scale")$col_means,
   col_sds = attr(output_scaled, "col_scale")$col_sds,
@@ -199,7 +201,7 @@ head(post_samples)
 The triangle (corner) plot below shows the pairwise marginal distributions of the nine polynomial outputs for the first test observation. The blue reference points/lines mark the true values. Well-calibrated samples should scatter symmetrically around the truth.
 
 ```{r fig.width=6, fig.height=6, eval=eval_global}
-magtri(post_samples, refvals = poly_test$output[1,],
+magtri(post_samples, refvals = poly_test$output[index,],
        quan_range = c(0.02, 0.98))
 ```
 
