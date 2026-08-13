@@ -26,6 +26,14 @@ probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components,
     
     # 4. Backpropagate & step
     current_loss$backward()
+    
+    #To stop big movements we do manual gradient clipping
+    for (param in model$parameters) {
+      if (!is.null(param$grad)) {
+        param$grad <- torch_clamp(param$grad, min = -1, max = 1)
+      }
+    }
+    
     optimizer$step()
     
     # 5. Safe to detach for logging AFTER gradients are captured

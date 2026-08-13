@@ -15,6 +15,14 @@ probotSingleEpochFlow <- function(model,
     )
 
     current_loss$backward()
+    
+    #To stop big movements we do manual gradient clipping
+    for (param in model$parameters) {
+      if (!is.null(param$grad)) {
+        param$grad <- torch_clamp(param$grad, min = -1, max = 1)
+      }
+    }
+    
     optimizer$step()
 
     running_loss <- running_loss + current_loss$item() * batch[[1]]$size(1)

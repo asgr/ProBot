@@ -131,7 +131,7 @@ to handle mini-batching and device placement efficiently.
 flow_dataloader <- probotDataLoader(
   input  = output_scaled,
   output = input_scaled,
-  batch  = 1024
+  batch  = 4096
 )
 ```
 
@@ -370,7 +370,7 @@ for (i in seq_len(n_tarp)) {
   ctx_i <- torch_tensor(
     output_test_scaled[i, , drop = FALSE],
     dtype = torch_float()
-  )$to(device = device)
+  )$to(device = torch_device('mps'))
 
   samp_i <- probotSamplePostNF(
     context_x = ctx_i,
