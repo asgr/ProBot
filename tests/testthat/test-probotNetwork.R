@@ -202,3 +202,20 @@ test_that("probotNetworkSuggest errors on non-positive dimensions", {
   expect_error(probotNetworkSuggest(0, 2, type = "Point", verbose = FALSE))
   expect_error(probotNetworkSuggest(5, 0, type = "Point", verbose = FALSE))
 })
+
+test_that("probotNetworkSuggest rejects non-integer numeric dimensions", {
+  expect_error(probotNetworkSuggest(1.9, 2, type = "Point", verbose = FALSE))
+  expect_error(probotNetworkSuggest(3, 2.5, type = "MDN", verbose = FALSE))
+})
+
+test_that("probotNetworkSuggest MDN components correct for odd output_dim", {
+  # output_dim=3 => ceiling(3/2) = 2, but clamped to max(3, 2) = 3
+  s <- probotNetworkSuggest(5, 3, type = "MDN", verbose = FALSE)
+  expect_equal(s$mdn_components, 3L)
+  # output_dim=5 => ceiling(5/2) = 3, so max(3,3) = 3
+  s2 <- probotNetworkSuggest(5, 5, type = "MDN", verbose = FALSE)
+  expect_equal(s2$mdn_components, 3L)
+  # output_dim=10 => ceiling(10/2) = 5
+  s3 <- probotNetworkSuggest(5, 10, type = "MDN", verbose = FALSE)
+  expect_equal(s3$mdn_components, 5L)
+})

@@ -101,8 +101,10 @@ probotNetworkSuggest <- function(input_dim, output_dim, type = "MDN", verbose = 
   type <- match.arg(toupper(type), c("FLOW", "MDN", "POINT"))
 
   stopifnot(
-    is.numeric(input_dim),  length(input_dim)  == 1L, input_dim  >= 1,
-    is.numeric(output_dim), length(output_dim) == 1L, output_dim >= 1
+    is.numeric(input_dim),  length(input_dim)  == 1L,
+    input_dim  >= 1, input_dim  == as.integer(input_dim),
+    is.numeric(output_dim), length(output_dim) == 1L,
+    output_dim >= 1, output_dim == as.integer(output_dim)
   )
 
   input_dim  <- as.integer(input_dim)
@@ -136,7 +138,7 @@ probotNetworkSuggest <- function(input_dim, output_dim, type = "MDN", verbose = 
 
     MDN = {
       hidden_dims   <- c(n_ref, 2L * n_ref, n_ref)
-      mdn_components <- pmax(3L, pmin(20L, ceiling(output_dim / 2L)))
+      mdn_components <- pmax(3L, pmin(20L, ceiling(as.numeric(output_dim) / 2)))
       dropout        <- if (input_dim >= 10L) 0.1 else 0
       suggestion <- list(
         input_dim      = input_dim,
