@@ -96,3 +96,109 @@ test_that("probotMakeFlow forward then inverse recovers input", {
     tolerance = 1e-4
   )
 })
+
+# ---- probotNetworkSuggest tests ----
+
+test_that("probotNetworkSuggest returns list for Point", {
+  s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
+  expect_type(s, "list")
+  expect_named(s, c("input_dim", "output_dim", "hidden_dims", "dropout"))
+  expect_equal(s$input_dim, 5L)
+  expect_equal(s$output_dim, 2L)
+  expect_length(s$hidden_dims, 3L)
+})
+
+test_that("probotNetworkSuggest returns list for MDN", {
+  s <- probotNetworkSuggest(10, 3, type = "MDN", verbose = FALSE)
+  expect_type(s, "list")
+  expect_named(s, c("input_dim", "output_dim", "mdn_components", "hidden_dims", "dropout"))
+  expect_gte(s$mdn_components, 3L)
+  expect_lte(s$mdn_components, 20L)
+})
+
+test_that("probotNetworkSuggest returns list for Flow", {
+  s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
+  expect_type(s, "list")
+  expect_named(s, c("dim_x", "dim_theta", "n_layers", "hidden_dim"))
+  expect_equal(s$dim_x, 6L)
+  expect_equal(s$dim_theta, 4L)
+})
+
+test_that("probotNetworkSuggest type matching is case-insensitive", {
+  s1 <- probotNetworkSuggest(4, 2, type = "point", verbose = FALSE)
+  s2 <- probotNetworkSuggest(4, 2, type = "POINT", verbose = FALSE)
+  expect_equal(s1, s2)
+})
+
+test_that("probotNetworkSuggest hidden_dims hourglass shape for Point", {
+  s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
+  expect_equal(s$hidden_dims[1], s$hidden_dims[3])
+  expect_equal(s$hidden_dims[2], 2L * s$hidden_dims[1])
+})
+
+test_that("probotNetworkSuggest Flow n_layers clamped in [4, 16]", {
+  s_small <- probotNetworkSuggest(2, 1, type = "Flow", verbose = FALSE)
+  expect_gte(s_small$n_layers, 4L)
+
+  s_large <- probotNetworkSuggest(2, 20, type = "Flow", verbose = FALSE)
+  expect_lte(s_large$n_layers, 16L)
+})
+
+test_that("probotNetworkSuggest MDN mdn_components min is 3", {
+  s <- probotNetworkSuggest(4, 1, type = "MDN", verbose = FALSE)
+  expect_gte(s$mdn_components, 3L)
+})
+
+test_that("probotNetworkSuggest dropout 0 for small input_dim", {
+  s <- probotNetworkSuggest(3, 2, type = "Point", verbose = FALSE)
+  expect_equal(s$dropout, 0)
+})
+
+test_that("probotNetworkSuggest dropout > 0 for large input_dim", {
+  s <- probotNetworkSuggest(15, 2, type = "Point", verbose = FALSE)
+  expect_gt(s$dropout, 0)
+})
+
+test_that("probotNetworkSuggest prints output when verbose = TRUE", {
+  expect_output(
+    probotNetworkSuggest(5, 2, type = "MDN", verbose = TRUE),
+    "probotNetworkSuggest"
+  )
+})
+
+test_that("probotNetworkSuggest hidden_dims clamped to [32, 1024]", {
+  # Tiny dimensions: ref = 8 * (1+1) = 16, rounds to 32
+  s <- probotNetworkSuggest(1, 1, type = "Point", verbose = FALSE)
+  expect_gte(s$hidden_dims[1], 32L)
+
+  # Large dimensions: ref = 8 * (100+100) = 1600, clamps to 1024
+  s2 <- probotNetworkSuggest(100, 100, type = "Point", verbose = FALSE)
+  expect_lte(s2$hidden_dims[1], 1024L)
+})
+
+test_that("probotNetworkSuggest Point output plugs into probotMakePoint", {
+  s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
+  mdl <- do.call(probotMakePoint, c(s, list(device = "cpu")))()
+  expect_true(inherits(mdl, "nn_module"))
+})
+
+test_that("probotNetworkSuggest MDN output plugs into probotMakeMDN", {
+  s <- probotNetworkSuggest(5, 2, type = "MDN", verbose = FALSE)
+  mdl <- do.call(probotMakeMDN, c(s, list(device = "cpu")))()
+  expect_true(inherits(mdl, "nn_module"))
+})
+
+test_that("probotNetworkSuggest Flow output plugs into probotMakeFlow", {
+  s <- probotNetworkSuggest(5, 2, type = "Flow", verbose = FALSE)
+  mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
+  expect_true(inherits(mdl, "nn_module"))
+})
+
+test_that("probotNetworkSuggest errors on invalid type", {
+  expect_error(probotNetworkSuggest(5, 2, type = "GAN", verbose = FALSE))
+})
+
+test_that("probotNetworkSuggest errors on non-positive dimensions", {
+  expect_error(probotNetworkSuggest(0, 2, type = "Point", verbose = FALSE))
+  expect_error(probotNetworkSuggest(5, 0, type = "Point", verbose = FALSE))
+})
