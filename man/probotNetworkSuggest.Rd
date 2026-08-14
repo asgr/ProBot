@@ -110,15 +110,15 @@ probotNetworkSuggest(input_dim = 6, output_dim = 4, type = "Flow")
 ## --- Pass directly to network constructor ------------------------------------
 \dontrun{
 suggest <- probotNetworkSuggest(input_dim = 6, output_dim = 4,
-                                type = "Flow", verbose = FALSE)
+                                type = "Flow", verbose = TRUE)
 flow <- do.call(probotMakeFlow, c(suggest, list(device = "cpu")))()
 
 suggest_mdn <- probotNetworkSuggest(input_dim = 10, output_dim = 3,
-                                    type = "MDN", verbose = FALSE)
+                                    type = "MDN", verbose = TRUE)
 mdn <- do.call(probotMakeMDN, c(suggest_mdn, list(device = "cpu")))()
 
 suggest_pt <- probotNetworkSuggest(input_dim = 5, output_dim = 2,
-                                   type = "Point", verbose = FALSE)
+                                   type = "Point", verbose = TRUE)
 pt <- do.call(probotMakePoint, c(suggest_pt, list(device = "cpu")))()
 }
 }
