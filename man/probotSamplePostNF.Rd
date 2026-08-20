@@ -19,8 +19,7 @@ probotSamplePostNF(
 )
 }
 \arguments{
-   \item{input}{Numeric vector or matrix (single observation), or a torch tensor.
-   Accepts raw R vectors/matrices which are automatically converted to tensors.}
+   \item{input}{Numeric vector (single observation) or matrix (multiple observations, where rows are observations and columns are parameters), or a torch tensor. Accepts raw R vectors/matrices which are automatically converted to tensors.}
 
    \item{model}{An instantiated normalizing flow \code{\link[torch]{nn_module}} object
    (e.g., from \code{\link{probotMakeFlow}}). The model is set
@@ -59,8 +58,11 @@ unstandardized using \code{\link{probotScaleBackward}},
 which reverses the scaling applied during training.
 }
 \value{
-A numeric matrix of shape \eqn{n\_samples \times D}, where \eqn{D} is the number
+If \option{input} is a vector, returns a numeric matrix of shape \eqn{n\_samples \times D}, where \eqn{D} is the number
 of parameters. Column names are set from \code{col_names} if provided.
+
+If \option{input} is a amtrix, returns a numeric array of shape \eqn{n\_samples \times D \times Nrow}, where \eqn{D} is the number
+of parameters and Nrow is the number of rows in our \option{input} matrix. Column names are set from \code{col_names} if provided.
 }
 \author{
 Aaron Robotham
