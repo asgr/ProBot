@@ -23,6 +23,7 @@ probotSave <- function(
     soft_clamp = NULL,
     col_means = NULL,
     col_sds = NULL,
+    col_names = NULL,
     training_history = NULL,
     extra_metadata = list()
 ) {
@@ -65,6 +66,7 @@ probotSave <- function(
       soft_clamp      = soft_clamp,
       col_means       = col_means,
       col_sds         = col_sds,
+      col_names       = col_names,
       training_history = training_history
     ),
     extra_metadata
