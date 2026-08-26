@@ -200,23 +200,28 @@ probotMakeFlowCouple <- nn_module(
     }
 
     # 2. Build hidden connection pathways
+    # MADE masking convention (Germain et al.):
+    #   - First hidden layer uses strict > so hidden node k only sees theta_{1..k-1} (not theta_k itself),
+    #     while x (degree 0) remains visible to all hidden nodes since k > 0 for all k >= 1.
+    #   - Subsequent hidden layers and the output layer use >= so the chain propagates correctly and
+    #     output_j (degree j) only reaches theta_{1..j-1} end-to-end.
     for (i in 1:n_layers) {
       current_layer <- self$layers[[i]]
 
       if (i == 1) {
-        mask <- hidden_degrees_list[[1]]$unsqueeze(2) >= input_degrees$unsqueeze(1)
+        mask <- hidden_degrees_list[[1]]$unsqueeze(2) > input_degrees$unsqueeze(1)
       } else {
         mask <- hidden_degrees_list[[i]]$unsqueeze(2) >= hidden_degrees_list[[i-1]]$unsqueeze(1)
       }
       current_layer$set_mask(mask$to(dtype = torch_float()))
     }
 
-    # 3. FIX: Output layers can look at nodes with a degree greater than or equal to their assigned target position
+    # 3. Output layer: output_j (degree j) sees hidden nodes with degree <= j.
+    # Combined with the strict > in the first hidden layer this guarantees that
+    # the shift and log_scale for theta_j depend only on theta_{1..j-1} and x.
     output_degrees <- torch_repeat_interleave(torch_arange(1, dim_theta), repeats = 2)
     last_hidden_degrees <- hidden_degrees_list[[n_layers]]
 
-    # Changed from strictly greater-than (>) to greater-than-or-equal-to (>=)
-    # to maintain proper conditioning flows across all 9 target outputs
     output_mask <- output_degrees$unsqueeze(2) >= last_hidden_degrees$unsqueeze(1)
     self$output_layer$set_mask(output_mask$to(dtype = torch_float()))
 
