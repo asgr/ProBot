@@ -140,8 +140,8 @@ probotSamplePostNF <- function(input,
 
   if (!is.null(col_means)) {
     for (j in seq_len(n_dim)) {
-      samples[, , j] <-
-        samples[, , j] *
+      samples[,j,] <-
+        samples[,j,] *
         col_sds[j] +
         col_means[j]
 
@@ -159,6 +159,5 @@ probotSamplePostNF <- function(input,
 
   }
 
-  samples
-
+  return(samples)
 }
