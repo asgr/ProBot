@@ -28,6 +28,7 @@ probotSave(
   soft_clamp = NULL,
   col_means = NULL,
   col_sds = NULL,
+  col_names = NULL,
   training_history = NULL,
   extra_metadata = list()
 )
@@ -59,9 +60,9 @@ probotLoad(
     \item{mdn_components}{Number of MDN mixture components. Required for
     \code{model_type = "mdn"}.}
 
-    \item{input_dim}{Dimension of the input layer. Required for MDN and Point models.}
+    \item{input_dim}{Dimension of the input layer. Required for Flow, MDN and Point models.}
 
-    \item{output_dim}{Dimension of the output layer. Required for MDN and Point models.}
+    \item{output_dim}{Dimension of the output layer. Required for Flow, MDN and Point models.}
 
     \item{dim_theta}{Dimensionality of the parameter space. Required for
     \code{model_type = "flow"}.}
@@ -90,6 +91,8 @@ probotLoad(
     \item{col_means}{Centering values from \code{\link{probotScaleForward}}(); saved as metadata.}
 
     \item{col_sds}{Scaling values from \code{\link{probotScaleForward}}(); saved as metadata.}
+
+    \item{col_names}{Column names for output theta parameters we want to model; saved as metadata.}
 
     \item{training_history}{Training history data frame; saved as metadata.}
 
