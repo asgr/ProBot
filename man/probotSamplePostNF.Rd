@@ -15,7 +15,9 @@ probotSamplePostNF(
   col_sds = NULL,
   col_names = NULL,
   dim_theta = NULL,
-  device = NULL
+  device = NULL,
+  batch_size = NULL,
+  verbose = FALSE
 )
 }
 \arguments{
@@ -42,6 +44,15 @@ probotSamplePostNF(
 
    \item{device}{Torch device string (e.g., "cpu", "mps"). Defaults to \code{NULL},
    which auto-detects from the model's parameters.}
+
+   \item{batch_size}{Number of observations processed per chunk in multi-observation
+   mode. If \code{NULL} (default), it is chosen automatically so that roughly
+   \code{2e6} rows (\code{batch_size * n_samples}) of latent space are held in
+   memory at once. Lower this on machines with less RAM, or raise it if more
+   headroom is available. Ignored in single-observation mode.}
+
+   \item{verbose}{Logical; if \code{TRUE} and processing in multiple chunks,
+   print a progress message at regular intervals.}
 }
 \details{
 The model is set to evaluation mode (\code{model$eval()}) and all
@@ -54,15 +65,24 @@ torch tensor and placed on the same device as the model. If \code{input} is
 conditioned on the same observed data.
 
 When \code{col_means} is provided, the sampled parameters are automatically
-unstandardized using \code{\link{probotScaleBackward}},
-which reverses the scaling applied during training.
+unstandardized on-device using a single fused broadcast, which reverses the
+scaling applied during training.
+
+In multi-observation mode, observations are processed in chunks of
+\code{batch_size} rows to keep peak memory bounded, so very large samples
+(millions of observations) can be handled without exhausting memory. Only the
+accumulated output array and one chunk of intermediate tensors are held at a
+time.
 }
 \value{
 If \option{input} is a vector, returns a numeric matrix of shape \eqn{n\_samples \times D}, where \eqn{D} is the number
 of parameters. Column names are set from \code{col_names} if provided.
 
-If \option{input} is a amtrix, returns a numeric array of shape \eqn{n\_samples \times D \times Nrow}, where \eqn{D} is the number
-of parameters and Nrow is the number of rows in our \option{input} matrix. Column names are set from \code{col_names} if provided.
+If \option{input} is a matrix, returns a numeric array of shape
+\eqn{n\_samples \times D \times Nrow}, where \eqn{D} is the number of
+parameters and \eqn{Nrow} is the number of rows in \option{input}. The
+\code{Sample}, \code{Parameter}, and \code{Observation} dimension names are
+set from \code{col_names} and the row/observation indices if provided.
 }
 \author{
 Aaron Robotham
