@@ -219,13 +219,15 @@ probotMakeFlowCouple <- nn_module(
     # 3. Output layer: output_j (degree j) sees hidden nodes with degree <= j.
     # Combined with the strict > in the first hidden layer this guarantees that
     # the shift and log_scale for theta_j depend only on theta_{1..j-1} and x.
-    output_degrees <- torch_repeat_interleave(torch_arange(1, dim_theta), repeats = 2)
+    # Each output (shift_j, log_scale_j) sits at degree j; built in R to avoid
+    # torch_repeat_interleave, whose CPU kernel rejects non-integer repeats.
+    output_degrees <- torch_tensor(rep(seq_len(dim_theta), each = 2), dtype = torch_long())
     last_hidden_degrees <- hidden_degrees_list[[n_layers]]
 
     output_mask <- output_degrees$unsqueeze(2) >= last_hidden_degrees$unsqueeze(1)
     self$output_layer$set_mask(output_mask$to(dtype = torch_float()))
 
-    target_device <- if (!is.null(device)) device else (if (cuda_is_available()) "cuda" else "cpu")
+    target_device <- .probotChooseDevice(device)
     self$to(device = target_device)
   },
 
@@ -285,7 +287,7 @@ probotMakeFlowCouple <- nn_module(
 
   forward = function(theta, x) {
     # Reverse the columns of theta
-    z <- theta$index_select(2, self$reverse_idx)
+    z <- torch_flip(theta, dims = c(2))
     # Reversing order is an orthogonal transformation; its Jacobian determinant is always 1 (log(1) = 0)
     log_det_jac <- torch_zeros(c(theta$size(1), 1), device = theta$device)
 
@@ -300,8 +302,7 @@ probotMakeFlowCouple <- nn_module(
 
 probotFlowAutoReg <- nn_module(
   "probotFlowAutoReg",
-  initialize = function(dim_theta, dim_x, n_blocks = 5, n_layers_per_block = 2, hidden_dim = 500,
-                        soft_clamp = 3, device = NULL) {
+  initialize = function(dim_theta, dim_x, n_blocks = 5, n_layers_per_block = 2, hidden_dim = 500, soft_clamp = 3, device = NULL) {
     self$dim_theta <- dim_theta
     self$dim_x <- dim_x
     self$n_blocks <- n_blocks
