@@ -246,8 +246,8 @@ probotMakeFlowCouple <- nn_module(
     log_scale <- out_reshaped$narrow(3, 2, 1)$squeeze(3)
 
     log_scale <- soft_clamp * torch_tanh(log_scale / soft_clamp)
-    z <- (theta - shift) * torch_exp(log_scale)
-    log_det_jac <- log_scale$sum(dim = 2, keepdim = TRUE)
+    z <- (theta - shift) * torch_exp(-log_scale)
+    log_det_jac <- (-log_scale)$sum(dim = 2, keepdim = TRUE)
 
     list(z = z, log_det_jac = log_det_jac)
   },
@@ -260,12 +260,12 @@ probotMakeFlowCouple <- nn_module(
       out <- self$forward_mlp(combined)
 
       out_reshaped <- out$view(c(-1, self$dim_theta, 2))
-      shift_i <- out_reshaped$narrow(2, i, 1)$narrow(3, 1, 1)$squeeze()
-      log_scale_i <- out_reshaped$narrow(2, i, 1)$narrow(3, 2, 1)$squeeze()
+      shift_i <- out_reshaped$narrow(2, i, 1)$narrow(3, 1, 1)$squeeze(3)$squeeze(2)
+      log_scale_i <- out_reshaped$narrow(2, i, 1)$narrow(3, 2, 1)$squeeze(3)$squeeze(2)
       log_scale_i = soft_clamp * torch_tanh(log_scale_i / soft_clamp)
 
-      z_i <- z$narrow(2, i, 1)$squeeze()
-      theta_i <- z_i * torch_exp(-log_scale_i) + shift_i
+      z_i <- z$narrow(2, i, 1)$squeeze(2)
+      theta_i <- z_i * torch_exp(log_scale_i) + shift_i
 
       theta$narrow(2, i, 1)$copy_(theta_i$unsqueeze(2))
     }
