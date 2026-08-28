@@ -1,4 +1,5 @@
 \name{probotPost}
+\alias{probotPost}
 \alias{probotSamplePostMDN}
 \alias{probotMarginalPostMDN}
 \title{Sample and Summarize Posteriors from MDN Outputs}

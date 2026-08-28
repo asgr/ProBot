@@ -15,7 +15,13 @@ problems.  The user should always verify the suggested complexity by
 inspecting training/validation loss curves and adjusting accordingly.
 }
 \usage{
-probotNetworkSuggest(input_dim, output_dim, type = "MDN", verbose = TRUE)
+probotNetworkSuggest(
+  input_dim,
+  output_dim,
+  n_train = NULL,
+  type = "MDN",
+  verbose = TRUE
+)
 }
 \arguments{
   \item{input_dim}{Integer. Number of input features (context / observed data
@@ -23,6 +29,15 @@ probotNetworkSuggest(input_dim, output_dim, type = "MDN", verbose = TRUE)
 
   \item{output_dim}{Integer. Number of output dimensions (parameters to
     infer). For \code{type = "Flow"} this corresponds to \code{dim_theta}.}
+
+  \item{n_train}{Optional integer: the number of training observations. When
+    supplied, the heuristics are additionally scaled by
+    \eqn{\sqrt{\mathtt{n\_train}}}: the reference neuron count is multiplied
+    by this factor, the number of MDN mixture components is scaled by
+    \code{round(output_dim * log10(n_train) / 4)}, and the Flow number of
+    layers is scaled by \code{log10(n_train) / 4} (capped at \code{2}). If
+    \code{NULL} (default), the suggestions depend only on the input/output
+    dimensions.}
 
   \item{type}{Character string; one of \code{"Flow"}, \code{"MDN"}, or
     \code{"Point"} (case-insensitive). Defaults to \code{"MDN"}.}
@@ -53,17 +68,23 @@ avoid pathologically small or large layers.
 \itemize{
   \item Same hidden-layer pattern as Point networks.
   \item Number of mixture components:
-    \eqn{\max\!\left(3,\,\lceil \mathtt{output\_dim}/2 \rceil\right)},
-    clamped to 20 to prevent degenerate over-parameterisation.
+    \eqn{\max\!\left(3,\,\lceil \mathtt{output\_dim}/2 \rceil\right)} when
+    \code{n_train} is \code{NULL}, otherwise
+    \eqn{\max\!\left(3,\,\mathtt{output\_dim} \times
+    \log_{10}(\mathtt{n\_train})/4\right)}, in both cases clamped to 20 to
+    prevent degenerate over-parameterisation.
   \item Dropout as per Point rule.
 }
 
 \strong{Flow networks}
 \itemize{
-  \item Number of coupling layers:
-    \eqn{\max(4,\;2 \times \mathtt{output\_dim})}, clamped to 16.
-  \item Hidden dimension per coupling layer: \eqn{N_{\mathrm{ref}}},
-    clamped between 32 and 512.
+  \item Number of layers (coupling layers, or autoregressive blocks):
+    \eqn{\max\!\left(4,\,2 + \mathtt{output\_dim}\right)}, clamped to 16;
+    when \code{n_train} is supplied it is further scaled by
+    \code{log10(n_train) / 4} (capped at \code{2}).
+  \item Hidden dimension per layer: \eqn{N_{\mathrm{ref}}}, clamped between
+    32 and 512. Note this returns \code{hidden_dim}, which
+    \code{\link{probotMakeFlow}} passes through unchanged.
 }
 }
 }

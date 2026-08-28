@@ -66,8 +66,8 @@ test_that("probotMakeFlow inverse returns theta of correct shape", {
   expect_equal(theta$shape, c(4L, 4L))
 })
 
-test_that("probotCouplingLayer forward and inverse are consistent", {
-  layer <- probotCouplingLayer(4, 2, hidden_dim = 8, device = "cpu")()
+test_that(".probotCouplingLayer forward and inverse are consistent", {
+  layer <- ProBot:::.probotCouplingLayer(4, 2, hidden_dim = 8, device = "cpu")
   theta <- torch_randn(2, 4)
   x <- torch_randn(2, 2)
 

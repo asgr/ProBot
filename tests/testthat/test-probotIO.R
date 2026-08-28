@@ -266,6 +266,57 @@ test_that("flow save-load round-trip preserves forward output", {
   )
 })
 
+test_that("probotSave/probotLoad round-trips flow_style for both architectures", {
+  set.seed(42)
+  tmp <- tempfile(fileext = ".pt")
+  on.exit(unlink(tmp), add = TRUE)
+
+  # autoreg: flow_style should be inferred from the model class and round-trip
+  mdl_a <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 16,
+                          device = "cpu", style = "autoreg")()
+  probotSave(mdl_a, filename = tmp, model_type = "flow",
+             dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 16, soft_clamp = 3)
+
+  cp <- torch_load(tmp, device = "cpu")
+  expect_equal(cp$metadata$flow_style, "autoreg")
+
+  res_a <- probotLoad(tmp, device = "cpu")
+  expect_true(inherits(res_a$model, "probotFlowAutoReg"))
+
+  # couple: the default architecture
+  mdl_c <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8,
+                          device = "cpu")()
+  probotSave(mdl_c, filename = tmp, model_type = "flow",
+             dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
+
+  cp2 <- torch_load(tmp, device = "cpu")
+  expect_equal(cp2$metadata$flow_style, "couple")
+
+  res_c <- probotLoad(tmp, device = "cpu")
+  expect_true(inherits(res_c$model, "probotMakeFlowCouple"))
+})
+
+test_that("probotLoad defaults to couple when flow_style metadata is absent", {
+  set.seed(42)
+  tmp <- tempfile(fileext = ".pt")
+  on.exit(unlink(tmp), add = TRUE)
+
+  mdl <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  # Save a legacy-style checkpoint with no flow_style field.
+  torch_save(
+    list(
+      model_state = mdl$state_dict(),
+      optimizer_state = NULL,
+      metadata = list(version = "1.0", model_type = "flow",
+                      dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8)
+    ),
+    tmp
+  )
+
+  res <- probotLoad(tmp, device = "cpu")
+  expect_true(inherits(res$model, "probotMakeFlowCouple"))
+})
+
 test_that("probotSave warns on missing metadata per model type", {
   set.seed(42)
   tmp <- tempfile(fileext = ".pt")

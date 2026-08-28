@@ -21,6 +21,7 @@ probotSave <- function(
     activation_name = NULL,
     dropout = NULL,
     soft_clamp = NULL,
+    flow_style = NULL,
     col_means = NULL,
     col_sds = NULL,
     col_names = NULL,
@@ -28,6 +29,20 @@ probotSave <- function(
     extra_metadata = list()
 ) {
   model_type <- match.arg(tolower(model_type), c("mdn", "point", "flow"))
+
+  # For flow models, record which architecture the checkpoint holds so
+  # probotLoad() can reconstruct the correct skeleton. Infer it from the
+  # model's class when not given explicitly (a probotFlowAutoReg instance
+  # reports "autoreg"; anything else is treated as the coupling default).
+  if (model_type == "flow") {
+    if (is.null(flow_style)) {
+      flow_style <- if (any(grepl("AutoReg", class(model)))) "autoreg" else "couple"
+    } else {
+      flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg"))
+    }
+  } else {
+    flow_style <- NULL
+  }
 
   required <- .probotRequired[[model_type]]
 
@@ -64,6 +79,7 @@ probotSave <- function(
       activation      = activation_name,
       dropout         = dropout,
       soft_clamp      = soft_clamp,
+      flow_style      = flow_style,
       col_means       = col_means,
       col_sds         = col_sds,
       col_names       = col_names,
@@ -125,7 +141,7 @@ probotLoadModel <- function(
        "reconstruction from saved metadata.")
 }
 
-probotLoad <- function(filename, load_optimizer = FALSE, device = NULL) {
+probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_style = NULL) {
   target_device <- .probotChooseDevice(device)
 
   checkpoint <- torch_load(filename, device = target_device)
@@ -140,6 +156,13 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL) {
   model_type <- if (!is.null(meta$model_type)) tolower(meta$model_type) else "mdn"
   if (!model_type %in% names(.probotRequired)) {
     model_type <- "mdn"
+  }
+
+  # flow_style is an optional override that takes precedence over the value
+  # saved in metadata. It is the escape hatch for loading older flow
+  # checkpoints saved before flow_style was recorded in the metadata block.
+  if (!is.null(flow_style)) {
+    flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg"))
   }
 
   required <- .probotRequired[[model_type]]
@@ -194,6 +217,9 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL) {
       n_layers    = if (!is.null(meta$n_layers)) meta$n_layers else 4,
       hidden_dim  = if (!is.null(meta$hidden_dim)) meta$hidden_dim else 32,
       soft_clamp  = if (!is.null(meta$soft_clamp)) meta$soft_clamp else 3,
+      # Priority: explicit override > saved metadata > "couple" (legacy default).
+      style       = if (!is.null(flow_style)) flow_style else
+                    if (!is.null(meta$flow_style)) meta$flow_style else "couple",
       device      = device
     )()
   )

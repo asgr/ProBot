@@ -47,7 +47,9 @@ Sampling is fast: draw `z ~ N(0, I)` and apply the inverse transformation.
 
 ### The coupling-layer architecture
 
-**ProBot**'s `probotNetworkFlow` stacks multiple `probotCouplingLayer` modules.
+**ProBot**'s coupling flow (`probotMakeFlow(style = "couple")`, also available
+directly as `probotMakeFlowCouple`) stacks multiple coupling layers
+(`.probotCouplingLayer`, a private module).
 Each coupling layer:
 
 1. Splits the parameter vector `θ` into two halves, `θ₁` and `θ₂`.
@@ -155,7 +157,7 @@ flow_model <- probotMakeFlow(
 
 ### Training the flow
 
-Training is handled by `probotMultiEpochFlow()`, which wraps the negative-log-likelihood
+Training is handled by `probotTrainFlow()`, which wraps the negative-log-likelihood
 loop and includes optional features like early stopping.
 
 ```{r train-flow, eval = eval_global}
@@ -420,8 +422,9 @@ MDNs are often preferable when:
 
 | Function | Role |
 |---|---|
-| `probotCouplingLayer` | Single affine coupling layer: maps `(θ, x) → (z, log_det_jac)` |
-| `probotNetworkFlow` | Stacked coupling-layer flow: forward (θ → z) and inverse (z → θ) |
+| `probotMakeFlowCouple()` | Stacked coupling-layer flow: forward (θ → z) and inverse (z → θ) |
+| `probotFlowAutoReg()` | Stacked masked-autoregressive block flow (alternative architecture) |
+| `probotMakeFlow()` | Facade that dispatches to either of the above via `style` |
 | `probotLossNF()` | Negative log-likelihood loss for flow training |
 | `probotSamplePostNF()` | Draw posterior samples via the inverse flow |
 | `probotScaleForward()` / `probotScaleBackward()` | Standardise columns and reverse the transform |

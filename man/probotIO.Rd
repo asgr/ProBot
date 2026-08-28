@@ -26,6 +26,7 @@ probotSave(
   activation_name = NULL,
   dropout = NULL,
   soft_clamp = NULL,
+  flow_style = NULL,
   col_means = NULL,
   col_sds = NULL,
   col_names = NULL,
@@ -43,7 +44,8 @@ probotLoadModel(
 probotLoad(
   filename,
   load_optimizer = FALSE,
-  device = NULL
+  device = NULL,
+  flow_style = NULL
 )
 }
 \arguments{
@@ -88,6 +90,16 @@ probotLoad(
     \item{soft_clamp}{Soft-clamp value for Flow log_scale (defaults to 3 if
     not saved).}
 
+    \item{flow_style}{Which flow architecture the checkpoint holds:
+    \code{"couple"} (stacked coupling layers, the default) or \code{"autoreg"}
+    (masked autoregressive blocks with permutation layers). Only meaningful
+    for \code{model_type = "flow"}. For \code{probotSave()} it is written into
+    the metadata; if \code{NULL}, it is inferred from the model's class
+    (\code{probotFlowAutoReg} instances yield \code{"autoreg"}, everything
+    else \code{"couple"}). For \code{probotLoad()} it acts as an override that
+    takes precedence over the saved value; useful for loading older flow
+    checkpoints saved before \code{flow_style} was recorded.}
+
     \item{col_means}{Centering values from \code{\link{probotScaleForward}}(); saved as metadata.}
 
     \item{col_sds}{Scaling values from \code{\link{probotScaleForward}}(); saved as metadata.}
@@ -131,6 +143,12 @@ not want to) auto-reconstruct from metadata.
 saved metadata and loads weights. It reads \code{model_type} from the
 checkpoint to decide which constructor to call. Old checkpoints that lack
 \code{model_type} default to \code{"mdn"} for backward compatibility.
+
+For \code{model_type = "flow"}, the checkpoint's \code{flow_style} metadata
+field selects the architecture (defaults to \code{"couple"} if the field is
+absent, as in checkpoints saved before this field existed). A \code{probotSave()}
+call records \code{flow_style} automatically; the \code{flow_style} argument
+to \code{probotLoad()} overrides the saved value.
 
 \code{probotLoadModel()} loads into an explicit model skeleton but does not
 require \code{model_type} metadata.
@@ -187,5 +205,8 @@ probotSave(
 )
 
 loaded_flow <- probotLoad("my_flow.pt")
+
+## Older autoreg checkpoint saved before flow_style was recorded:
+loaded_autoreg <- probotLoad("my_autoreg.pt", flow_style = "autoreg")
 }
 }

@@ -9,6 +9,11 @@
     initialize = function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=3, device = NULL) {
       self$dim_theta <- dim_theta
       self$dim_x <- dim_x
+      # Store on self: forward/inverse need it at call time. R restores
+      # function environments from the enclosing namespace at load, so a
+      # lexical reference to the constructor's argument silently breaks in
+      # loaded packages ("object 'soft_clamp' not found").
+      self$soft_clamp <- soft_clamp
 
       # Split parameter space in half for coupling
       self$d1 <- floor(dim_theta / 2)
@@ -55,7 +60,7 @@
       # Split into two vectors of length d2
       split_params <- torch_chunk(params, 2, dim = 2)
       shift <- split_params[[1]]
-      log_scale <- soft_clamp*torch_tanh(split_params[[2]] / soft_clamp)  # tanh-clamp for numerical stability
+      log_scale <- self$soft_clamp*torch_tanh(split_params[[2]] / self$soft_clamp)  # tanh-clamp for numerical stability
 
       # Apply affine transformation: z_2 = (theta_2 - t) * exp(s)
       z_2 <- (theta_2 - shift) * torch_exp(log_scale)
@@ -85,7 +90,7 @@
       params <- self$shift_scale_net(combined)
       split_params <- torch_chunk(params, 2, dim = 2)
       shift <- split_params[[1]]
-      log_scale <- soft_clamp*torch_tanh(split_params[[2]]/soft_clamp)
+      log_scale <- self$soft_clamp*torch_tanh(split_params[[2]]/self$soft_clamp)
 
       # Reverse affine transformation: theta_2 = z_2 / exp(s) + t
       theta_2 <- z_2 * torch_exp(-log_scale) + shift
@@ -278,11 +283,8 @@ probotMakeFlowCouple <- nn_module(
 
 .probotPermutationLayer <- nn_module(
   ".probotPermutationLayer",
-  initialize = function(dim_theta) {
+  initialize = function(dim_theta, device = NULL) {
     self$dim_theta <- dim_theta
-    # Create a vector that reverses the index order: e.g., c(9, 8, 7, ..., 1)
-    # Register as a buffer so it migrates to GPUs automatically
-    self$register_buffer("reverse_idx", torch_arange(dim_theta, 1, step = -1, dtype = torch_long()))
   },
 
   forward = function(theta, x) {
@@ -295,10 +297,40 @@ probotMakeFlowCouple <- nn_module(
   },
 
   inverse = function(z, x) {
-    # The inverse of a simple reversal is the exact same reversal
-    return(z$index_select(2, self$reverse_idx))
+    # The inverse of a simple reversal is the exact same reversal.
+    # Use torch_flip (no index tensor) instead of index_select: MPS
+    # index_select with an index tensor on a different device fails with
+    # "Placeholder storage has not been allocated on MPS device".
+    return(torch_flip(z, dims = c(2)))
   }
 )
+
+probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
+                           soft_clamp = 3, device = NULL, style = "couple") {
+  # Facade so probotLoad()'s "flow" reconstruction works. Returns a
+  # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
+  # Disambiguates the two flow architectures:
+  #   style = "couple"    -> stacked affine NVP coupling layers (default)
+  #   style = "autoreg"   -> masked autoregressive blocks + permutation layers
+  match.arg(style, c("couple", "autoreg"))
+  function() {
+    # Calling a named nn_module with its constructor args already returns an
+    # instantiated module, so no trailing `()` is added here.
+    switch(style,
+      couple = probotMakeFlowCouple(
+        dim_theta = dim_theta, dim_x = dim_x, n_layers = n_layers,
+        hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
+      ),
+      # hidden_dim is passed through untouched (no clamping) so that a
+      # save -> load round trip reconstructs the exact architecture.
+      autoreg = probotFlowAutoReg(
+        dim_theta = dim_theta, dim_x = dim_x, n_blocks = n_layers,
+        n_layers_per_block = 2, hidden_dim = hidden_dim,
+        soft_clamp = soft_clamp, device = device
+      )
+    )
+  }
+}
 
 probotFlowAutoReg <- nn_module(
   "probotFlowAutoReg",
@@ -326,7 +358,7 @@ probotFlowAutoReg <- nn_module(
 
       # 2. Add an alternating permutation layer between blocks (but skip after the very last block)
       if (i < n_blocks) {
-        self$blocks$append(.probotPermutationLayer(dim_theta = dim_theta))
+        self$blocks$append(.probotPermutationLayer(dim_theta = dim_theta, device = device))
       }
     }
   },

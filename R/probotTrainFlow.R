@@ -9,8 +9,8 @@ probotSingleEpochFlow <- function(model,
     optimizer$zero_grad()
 
     current_loss <- loss_fn(
-      output_true = batch[[2]], # Your context inputs x
-      output_pred = batch[[1]], # Your target parameters theta
+      output_true = batch[[2]], # Target parameters theta (dataloader output)
+      output_pred = batch[[1]], # Context inputs x (dataloader input)
       model = model
     )
 

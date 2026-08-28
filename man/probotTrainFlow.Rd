@@ -43,11 +43,19 @@ probotTrainFlow(model, dataloader, optimizer, epochs = 100,
 The data loader should provide observed summaries or features as inputs and the
 corresponding parameters as targets. Early stopping compares mean loss over the
 latest \code{stop_window} epochs to the previous window.
+
+Gradients are clipped to \code{[-1, 1]} in value (via
+\code{\link[torch]{nn_utils_clip_grad_value_}}) before each optimizer step.
+Flow training is sensitive to large updates because the negative-log-likelihood
+loss can spike; clipping mitigates this at the cost of slower, more stable
+progression. Unlike the MDN and Point trainers, \code{probotTrainFlow()} does
+not expose a \code{lambda} argument to blend the likelihood loss with a
+mixture-mean MSE loss.
 }
 \value{
 \itemize{
   \item \code{probotSingleEpochFlow()}: List with \code{loss}.
-  \item \code{probotMultiEpochFlow()}: List with trained \code{model} and
+  \item \code{probotTrainFlow()}: List with trained \code{model} and
   \code{history} data frame. The history data frame contains columns
   \code{epoch} and \code{loss}.
 }
