@@ -46,7 +46,7 @@ probotFlowAutoReg(
 }
 \details{
 The returned module exposes the same interface as
-\code{\link{probotMakeFlowCouple}}: \code{forward(theta, x)} returns a list
+\code{\link{probotFlowCouple}}: \code{forward(theta, x)} returns a list
 with \code{z} and \code{log_det_jac}, and \code{inverse(z, x)} maps a base
 draw \eqn{z \sim N(0, I)} back to parameter space.
 
@@ -78,7 +78,7 @@ An instantiated \code{\link[torch]{nn_module}}.
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotMakeFlow}}, \code{\link{probotMakeFlowCouple}},
+\code{\link{probotMakeFlow}}, \code{\link{probotFlowCouple}},
 \code{\link{probotLossNF}}, \code{\link{probotTrainFlow}},
 \code{\link{probotSamplePostNF}}
 }

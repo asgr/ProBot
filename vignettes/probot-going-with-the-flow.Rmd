@@ -48,7 +48,7 @@ Sampling is fast: draw `z ~ N(0, I)` and apply the inverse transformation.
 ### The coupling-layer architecture
 
 **ProBot**'s coupling flow (`probotMakeFlow(style = "couple")`, also available
-directly as `probotMakeFlowCouple`) stacks multiple coupling layers
+directly as `probotFlowCouple`) stacks multiple coupling layers
 (`.probotCouplingLayer`, a private module).
 Each coupling layer:
 
@@ -422,7 +422,7 @@ MDNs are often preferable when:
 
 | Function | Role |
 |---|---|
-| `probotMakeFlowCouple()` | Stacked coupling-layer flow: forward (θ → z) and inverse (z → θ) |
+| `probotFlowCouple()` | Stacked coupling-layer flow: forward (θ → z) and inverse (z → θ) |
 | `probotFlowAutoReg()` | Stacked masked-autoregressive block flow (alternative architecture) |
 | `probotMakeFlow()` | Facade that dispatches to either of the above via `style` |
 | `probotLossNF()` | Negative log-likelihood loss for flow training |

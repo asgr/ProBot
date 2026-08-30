@@ -293,7 +293,7 @@ test_that("probotSave/probotLoad round-trips flow_style for both architectures",
   expect_equal(cp2$metadata$flow_style, "couple")
 
   res_c <- probotLoad(tmp, device = "cpu")
-  expect_true(inherits(res_c$model, "probotMakeFlowCouple"))
+  expect_true(inherits(res_c$model, "probotFlowCouple"))
 })
 
 test_that("probotLoad defaults to couple when flow_style metadata is absent", {
@@ -314,7 +314,7 @@ test_that("probotLoad defaults to couple when flow_style metadata is absent", {
   )
 
   res <- probotLoad(tmp, device = "cpu")
-  expect_true(inherits(res$model, "probotMakeFlowCouple"))
+  expect_true(inherits(res$model, "probotFlowCouple"))
 })
 
 test_that("probotSave warns on missing metadata per model type", {

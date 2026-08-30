@@ -20,6 +20,7 @@ probotNetworkSuggest(
   output_dim,
   n_train = NULL,
   type = "MDN",
+  flow_style = "couple",
   verbose = TRUE
 )
 }
@@ -41,6 +42,10 @@ probotNetworkSuggest(
 
   \item{type}{Character string; one of \code{"Flow"}, \code{"MDN"}, or
     \code{"Point"} (case-insensitive). Defaults to \code{"MDN"}.}
+
+  \item{flow_style}{Character string; \code{"couple"} (default) or
+    \code{"autoreg"}. Only meaningful for \code{type = "Flow"}, but validated
+    for all types so an invalid value fails fast.}
 
   \item{verbose}{Logical. If \code{TRUE} (default) a human-readable summary
     of the suggestions is printed to the console.}
@@ -90,19 +95,27 @@ avoid pathologically small or large layers.
 }
 \value{
 A named list with entries ready to be passed to the corresponding constructor.
+The corresponding \code{probotMake*} constructors accept (and ignore) any
+extra arguments such as \code{n_params}, so the list can be passed directly
+via \code{do.call}.
 
 \describe{
   \item{\code{type = "Point"}}{
-    \code{input_dim}, \code{output_dim}, \code{hidden_dims}, \code{dropout}.
+    \code{input_dim}, \code{output_dim}, \code{hidden_dims}, \code{dropout},
+    \code{n_params}.
   }
   \item{\code{type = "MDN"}}{
     \code{input_dim}, \code{output_dim}, \code{mdn_components},
-    \code{hidden_dims}, \code{dropout}.
+    \code{hidden_dims}, \code{dropout}, \code{n_params}.
   }
   \item{\code{type = "Flow"}}{
-    \code{dim_x}, \code{dim_theta}, \code{n_layers}, \code{hidden_dim}.
+    \code{dim_x}, \code{dim_theta}, \code{n_layers}, \code{hidden_dim},
+    \code{style}, \code{n_params}.
   }
 }
+
+\code{n_params} is the estimated total number of trainable parameters
+(weights + biases) for the suggested architecture.
 
 The function also prints a human-readable summary when \code{verbose = TRUE}.
 The return value is invisibly returned so that it can be assigned or piped

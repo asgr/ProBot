@@ -1,6 +1,6 @@
 probotMakeMDN <- function(input_dim, output_dim, mdn_components,
                           hidden_dims = c(128, 256, 256), activation = nnf_relu, 
-                          dropout = 0, device = NULL) {
+                          dropout = 0, device = NULL, ...) {
   
   nn_module(
     "mlp",

@@ -34,7 +34,7 @@ probotMakeFlow(
     shift/scale network within each coupling layer, or of the masked MLP in
     each autoregressive block. \code{probotMakeFlow()} passes this value
     through unchanged (default 32); calling
-    \code{\link{probotMakeFlowCouple}} or
+    \code{\link{probotFlowCouple}} or
     \code{\link{probotFlowAutoReg}} directly instead uses their own
     defaults (32 and 500 respectively).}
 
@@ -49,7 +49,7 @@ probotMakeFlow(
     \item{style}{Which flow architecture to build: \code{"couple"} (stacked
     affine NVP coupling layers, the default) or \code{"autoreg"} (masked
     autoregressive blocks with alternating permutation layers). Determines
-    which module is returned: \code{\link{probotMakeFlowCouple}} or
+    which module is returned: \code{\link{probotFlowCouple}} or
     \code{\link{probotFlowAutoReg}}.}
 }
 \details{
@@ -105,7 +105,7 @@ once per block, so training is fast; the inverse (sampling) pass is
   \code{\link{probotTrainFlow}} and \code{\link{probotLossNF}}, rely on the
   standardisation from \code{\link{probotScaleForward}}, and are reconstructed
   on load from the \code{flow_style} metadata field. Validate the choice of
-  architecture with calibration diagnostics (see \code{\link{probotAssess}})
+  architecture with calibration diagnostics (see \code{\link{probotNetworkSuggest}})
   rather than assuming it.
 }
 }
@@ -124,7 +124,7 @@ pattern used by the other ProBot model constructors.
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotMakeFlowCouple}},
+\code{\link{probotFlowCouple}},
 \code{\link{probotFlowAutoReg}},
 \code{\link{probotLossNF}},
 \code{\link{probotTrainFlow}},

@@ -1,5 +1,5 @@
-\name{probotMakeFlowCouple}
-\alias{probotMakeFlowCouple}
+\name{probotFlowCouple}
+\alias{probotFlowCouple}
 \title{Construct a Coupling (Affine NVP) Normalizing Flow}
 \description{
 Construct an \code{\link[torch]{nn_module}} implementing a conditional
@@ -11,7 +11,7 @@ of the other half; the halves are swapped after each layer so that all
 parameters are mixed across the stack.
 }
 \usage{
-probotMakeFlowCouple(
+probotFlowCouple(
   dim_theta,
   dim_x,
   n_layers = 4,
@@ -80,7 +80,7 @@ Aaron Robotham
 if (requireNamespace("torch", quietly = TRUE)) {
 ## Build a 4-layer coupling flow for 2 parameters conditioned on 3 features.
 ## The call returns an instantiated module (no extra parentheses needed).
-flow <- probotMakeFlowCouple(dim_theta = 2, dim_x = 3, device = "cpu")
+flow <- probotFlowCouple(dim_theta = 2, dim_x = 3, device = "cpu")
 
 theta <- torch::torch_randn(c(10, 2))
 x <- torch::torch_randn(c(10, 3))

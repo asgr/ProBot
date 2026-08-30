@@ -103,8 +103,8 @@
 
 # --- 2. Flow Network Definition ---
 
-probotMakeFlowCouple <- nn_module(
-  "probotMakeFlowCouple",
+probotFlowCouple <- nn_module(
+  "probotFlowCouple",
     initialize = function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 3, device = NULL) {
       self$n_layers <- n_layers
 
@@ -306,7 +306,7 @@ probotMakeFlowCouple <- nn_module(
 )
 
 probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
-                           soft_clamp = 3, device = NULL, style = "couple") {
+                           soft_clamp = 3, device = NULL, style = "couple", ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
   # Disambiguates the two flow architectures:
@@ -317,7 +317,7 @@ probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
     # Calling a named nn_module with its constructor args already returns an
     # instantiated module, so no trailing `()` is added here.
     switch(style,
-      couple = probotMakeFlowCouple(
+      couple = probotFlowCouple(
         dim_theta = dim_theta, dim_x = dim_x, n_layers = n_layers,
         hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
       ),

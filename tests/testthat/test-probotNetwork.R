@@ -102,7 +102,7 @@ test_that("probotMakeFlow forward then inverse recovers input", {
 test_that("probotNetworkSuggest returns list for Point", {
   s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("input_dim", "output_dim", "hidden_dims", "dropout"))
+  expect_named(s, c("input_dim", "output_dim", "hidden_dims", "dropout", "n_params"))
   expect_equal(s$input_dim, 5L)
   expect_equal(s$output_dim, 2L)
   expect_length(s$hidden_dims, 3L)
@@ -111,7 +111,7 @@ test_that("probotNetworkSuggest returns list for Point", {
 test_that("probotNetworkSuggest returns list for MDN", {
   s <- probotNetworkSuggest(10, 3, type = "MDN", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("input_dim", "output_dim", "mdn_components", "hidden_dims", "dropout"))
+  expect_named(s, c("input_dim", "output_dim", "mdn_components", "hidden_dims", "dropout", "n_params"))
   expect_gte(s$mdn_components, 3L)
   expect_lte(s$mdn_components, 20L)
 })
@@ -119,9 +119,38 @@ test_that("probotNetworkSuggest returns list for MDN", {
 test_that("probotNetworkSuggest returns list for Flow", {
   s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("dim_x", "dim_theta", "n_layers", "hidden_dim"))
+  expect_named(s, c("dim_x", "dim_theta", "n_layers", "hidden_dim", "style", "n_params"))
   expect_equal(s$dim_x, 6L)
   expect_equal(s$dim_theta, 4L)
+  expect_equal(s$style, "couple")
+})
+
+test_that("probotNetworkSuggest Flow defaults to couple and is style-aware", {
+  s_default <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
+  s_couple  <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "couple",
+                                     verbose = FALSE)
+  expect_equal(s_default, s_couple)
+
+  s_auto <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "autoreg",
+                                  verbose = FALSE)
+  expect_equal(s_auto$style, "autoreg")
+})
+
+test_that("probotNetworkSuggest autoreg uses fewer blocks but wider conditioner", {
+  # Autoreg pays dim_theta sequential passes per block at sample time, so the
+  # heuristic keeps blocks low and shifts capacity into conditioner width.
+  for (d in c(2, 4, 8, 16)) {
+    cp <- probotNetworkSuggest(9, d, type = "Flow", verbose = FALSE)
+    ar <- probotNetworkSuggest(9, d, type = "Flow", flow_style = "autoreg",
+                               verbose = FALSE)
+    expect_lt(ar$n_layers, cp$n_layers)
+    expect_gt(ar$hidden_dim, cp$hidden_dim)
+  }
+})
+
+test_that("probotNetworkSuggest flow_style is validated even for non-Flow types", {
+  expect_error(probotNetworkSuggest(5, 2, type = "MDN",
+                                     flow_style = "normalising", verbose = FALSE))
 })
 
 test_that("probotNetworkSuggest type matching is case-insensitive", {
@@ -136,12 +165,43 @@ test_that("probotNetworkSuggest hidden_dims hourglass shape for Point", {
   expect_equal(s$hidden_dims[2], 2L * s$hidden_dims[1])
 })
 
-test_that("probotNetworkSuggest Flow n_layers clamped in [4, 16]", {
+test_that("probotNetworkSuggest Flow n_layers clamped (couple [4,24])", {
   s_small <- probotNetworkSuggest(2, 1, type = "Flow", verbose = FALSE)
   expect_gte(s_small$n_layers, 4L)
 
-  s_large <- probotNetworkSuggest(2, 20, type = "Flow", verbose = FALSE)
-  expect_lte(s_large$n_layers, 16L)
+  s_large <- probotNetworkSuggest(2, 200, type = "Flow", verbose = FALSE)
+  expect_lte(s_large$n_layers, 24L)
+})
+
+test_that("probotNetworkSuggest Flow n_layers clamped (autoreg [3,10])", {
+  s_small <- probotNetworkSuggest(2, 1, type = "Flow",
+                                   flow_style = "autoreg", verbose = FALSE)
+  expect_gte(s_small$n_layers, 3L)
+  expect_lte(s_small$n_layers, 10L)
+
+  s_large <- probotNetworkSuggest(2, 200, type = "Flow",
+                                   flow_style = "autoreg", verbose = FALSE)
+  expect_lte(s_large$n_layers, 10L)
+})
+
+test_that("probotNetworkSuggest autoreg hidden_dim has a higher floor", {
+  # Tiny dims: couple can drop to 32, autoreg floored at 64 for stable
+  # prefix conditioning.
+  cp <- probotNetworkSuggest(1, 1, type = "Flow", verbose = FALSE)
+  ar <- probotNetworkSuggest(1, 1, type = "Flow", flow_style = "autoreg",
+                             verbose = FALSE)
+  expect_gte(ar$hidden_dim, 64L)
+  expect_gte(cp$hidden_dim, 32L)
+  expect_lte(ar$hidden_dim, 512L)
+})
+
+test_that("probotNetworkSuggest Flow suggestions respect n_train", {
+  s_few <- probotNetworkSuggest(9, 4, n_train = 1000, type = "Flow",
+                                 flow_style = "autoreg", verbose = FALSE)
+  s_many <- probotNetworkSuggest(9, 4, n_train = 1e6, type = "Flow",
+                                 flow_style = "autoreg", verbose = FALSE)
+  expect_lte(s_few$n_layers, s_many$n_layers)
+  expect_lte(s_few$hidden_dim, s_many$hidden_dim)
 })
 
 test_that("probotNetworkSuggest MDN mdn_components min is 3", {
@@ -191,7 +251,15 @@ test_that("probotNetworkSuggest MDN output plugs into probotMakeMDN", {
 test_that("probotNetworkSuggest Flow output plugs into probotMakeFlow", {
   s <- probotNetworkSuggest(5, 2, type = "Flow", verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
-  expect_true(inherits(mdl, "nn_module"))
+  expect_true(inherits(mdl, "probotFlowCouple"))
+})
+
+test_that("probotNetworkSuggest autoreg output plugs into probotMakeFlow", {
+  s <- probotNetworkSuggest(5, 2, type = "Flow", flow_style = "autoreg",
+                            verbose = FALSE)
+  mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
+  expect_true(inherits(mdl, "probotFlowAutoReg"))
+  expect_equal(mdl$n_blocks, s$n_layers)
 })
 
 test_that("probotNetworkSuggest errors on invalid type", {
@@ -218,4 +286,51 @@ test_that("probotNetworkSuggest MDN components correct for odd output_dim", {
   # output_dim=10 => ceiling(10/2) = 5
   s3 <- probotNetworkSuggest(5, 10, type = "MDN", verbose = FALSE)
   expect_equal(s3$mdn_components, 5L)
+})
+
+# ---- n_params tests ----
+
+.count_params <- function(mdl) {
+  sum(vapply(mdl$parameters, function(p) prod(as.integer(p$shape)), numeric(1)))
+}
+
+test_that("probotNetworkSuggest n_params matches actual Point model", {
+  s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
+  mdl <- do.call(probotMakePoint, c(s, list(device = "cpu")))()
+  expect_equal(s$n_params, .count_params(mdl))
+})
+
+test_that("probotNetworkSuggest n_params matches actual MDN model", {
+  s <- probotNetworkSuggest(7, 3, type = "MDN", verbose = FALSE)
+  mdl <- do.call(probotMakeMDN, c(s, list(device = "cpu")))()
+  expect_equal(s$n_params, .count_params(mdl))
+})
+
+test_that("probotNetworkSuggest n_params matches actual coupling Flow model", {
+  s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
+  mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
+  expect_equal(s$n_params, .count_params(mdl))
+})
+
+test_that("probotNetworkSuggest n_params matches actual autoreg Flow model", {
+  s <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "autoreg",
+                            verbose = FALSE)
+  mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
+  # masks are buffers, not parameters, so the dense-counting heuristic is exact
+  expect_equal(s$n_params, .count_params(mdl))
+})
+
+test_that("probotNetworkSuggest prints n_params when verbose = TRUE", {
+  expect_output(
+    probotNetworkSuggest(5, 2, type = "Point", verbose = TRUE),
+    "n_params"
+  )
+})
+
+test_that("probotNetworkSuggest n_params prints with thousands separators", {
+  # hidden_dims clamp to 1024 for large dims -> n_params should be large
+  expect_output(
+    probotNetworkSuggest(100, 100, type = "Point", verbose = TRUE),
+    "n_params   : ~[0-9]"
+  )
 })

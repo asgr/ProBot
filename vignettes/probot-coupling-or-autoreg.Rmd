@@ -1,0 +1,414 @@
+---
+title: "ProBot: Coupling or AutoReg? Choosing a Flow Architecture"
+output: rmarkdown::html_vignette
+vignette: >
+  %\VignetteIndexEntry{ProBot: Coupling or AutoReg? Choosing a Flow Architecture}
+  %\VignetteEngine{knitr::rmarkdown}
+  %\VignetteEncoding{UTF-8}
+---
+
+```{r setup, include = FALSE}
+knitr::opts_chunk$set(collapse = TRUE, comment = "#>")
+library(ProBot)
+library(torch)
+library(magicaxis)
+set.seed(2517)
+torch_manual_seed(2517)
+# Training cells are slow; set TRUE to run them interactively.
+eval_train <- FALSE
+```
+
+## Overview
+
+The *Going with the Flow* vignette introduces normalising flows in general and walks
+through the coupling (RealNVP) architecture end to end. This vignette answers a
+narrower question that comes up every time you call `probotMakeFlow()`:
+
+**should `style` be `"couple"` or `"autoreg"`?**
+
+ProBot ships two conditional flow architectures behind that one facade. They share
+the same training loop (`probotTrainFlow()`), the same loss (`probotLossNF()`), the
+same sampler (`probotSamplePostNF()`), and the same save/load path (`probotSave()` /
+`probotLoad()`). They differ in *how a single layer decides what each parameter
+dimension is allowed to see*, and that difference has real consequences for
+expressiveness, sampling cost, and numerical behaviour.
+
+Both are trained the same way: maximise
+
+$$
+\log p(\theta \mid x) = \log p_{\text{base}}\!\big(f(\theta, x)\big) + \log\left|\det J_f(\theta, x)\right|
+$$
+
+Everything below concerns *how* $f$ is built.
+
+---
+
+## The two architectures
+
+### Coupling: `style = "couple"`
+
+`.probotCouplingLayer` splits the parameter vector into two halves and transforms one
+half conditioned on the other:
+
+1. Split $\theta = (\theta_1, \theta_2)$ at `d1 = floor(dim_theta / 2)`.
+2. A small MLP takes $(\theta_1, x)$ and predicts shift $t$ and log-scale $s$ for $\theta_2$.
+3. Apply $z_2 = (\theta_2 - t)\exp(s)$; $\theta_1$ passes through untouched.
+4. Swap the halves, so the next layer transforms the complementary subset.
+
+The Jacobian is triangular, so $\log|\det J|$ is just `log_scale summed over the
+transformed dimensions`. `probotFlowCouple` stacks `n_layers` of these.
+
+### AutoReg: `style = "autoreg"`
+
+`.probotFlowAutoRegBlock` implements a masked autoregressive flow (MAF). Instead of a
+fixed half-split, a degree-based mask enforces a *sequential* dependency structure:
+
+$$
+\text{shift}_j,\ \log\text{scale}_j \ \text{depend on}\ \theta_1, \dots, \theta_{j-1}\ \text{and}\ x
+$$
+
+The mask is built once at construction time and registered as a buffer, applied to the
+weights at every forward pass. The first hidden layer uses a strict `>` comparison so a
+hidden node at degree $k$ cannot see $\theta_k$ itself; later layers use `>=` to let the
+chain propagate. Conditioning context `x` is given degree 0, so it is visible everywhere.
+`probotFlowAutoReg` stacks `n_blocks` such blocks with a `torch_flip` permutation layer
+between them, reversing the parameter order so successive blocks condition in opposite
+directions.
+
+The distinction is easiest to see by comparing what each layer conditions on for a
+four-dimensional parameter vector:
+
+```
+coupling (split at d1 = 2)            autoreg (prefix conditioning)
+  theta_1, theta_2 pass through         x             -> shift/scale for theta_1
+  (theta_1, x) -> transform theta_2    theta_1, x    -> shift/scale for theta_2
+  next layer swaps the halves         theta_1:2, x   -> shift/scale for theta_3
+                                        theta_1:3, x   -> shift/scale for theta_4
+```
+
+Coupling asks "given half the vector, how should I distort the other half?" AutoReg
+asks "given everything before this dimension, how should I transform this dimension?"
+
+---
+
+## What they have in common
+
+Both architectures are:
+
+- **Exact-density** — invertible, so $\log p(\theta \mid x)$ is tractable via change of variables.
+- **Triangular-Jacobian** — $\log|\det J|$ is a cheap sum of per-dimension log-scales.
+- **Soft-clamped** — `soft_clamp` bounds $|s| \le$ `soft_clamp` through $s \leftarrow c\tanh(s/c)$, preventing the log-determinant from running away during training.
+- **Trained identically** — same `probotTrainFlow()`, including the gradient clipping it applies (`nn_utils_clip_grad_value_`, clip value 1.0) to both styles.
+
+Because they are interchangeable at the API level, you can train both and compare
+without touching any other part of your workflow.
+
+---
+
+## Where they differ
+
+### Parameter count
+
+AutoReg's conditioner must produce shift/log-scale for *every* dimension, for every
+degree, from a fully masked dense layer. Coupling's conditioner only produces outputs
+for half the dimensions, from a narrower input. The gap widens with `dim_theta`.
+
+```{r param-counts}
+n_par <- function(m) sum(vapply(m$parameters, function(p) prod(dim(p)), numeric(1)))
+
+pc <- do.call(rbind, lapply(c(2, 4, 8, 16), function(d) {
+  cp <- probotMakeFlow(dim_theta = d, dim_x = 9, n_layers = 6,
+                       hidden_dim = 64, device = "cpu")()
+  ar <- probotMakeFlow(dim_theta = d, dim_x = 9, n_layers = 6,
+                       hidden_dim = 64, device = "cpu", style = "autoreg")()
+  data.frame(dim_theta = d, couple = n_par(cp), autoreg = n_par(ar),
+             ratio = round(n_par(ar) / n_par(cp), 2))
+}))
+pc
+```
+
+At these settings the architectures are within ~25% of each other on parameter count
+even at 16 dimensions — parameter count is *not* the interesting difference.
+
+### Expressiveness per layer
+
+This is the substantive trade-off.
+
+| | Coupling | AutoReg |
+|---|---|---|
+| What conditions the transform of $\theta_j$ | The *other half* of $\theta$, fixed by `d1` | *All* $\theta_{1..j-1}$, plus $x$ |
+| Dependency depth for one dimension | 1 layer per half, alternating | Full prefix, every block |
+| Partition | Fixed 50/50 split | Ordered prefix |
+| Caveat | Components of the transformed half are updated independently of one another within a layer | Ordering matters; `torch_flip` between blocks mitigates it |
+
+A coupling layer at a single split cannot model within-half dependencies in one pass —
+it needs the swap and a second layer. The autoregressive block gets the full prefix in
+one pass. So for a fixed layer budget, AutoReg expresses richer dependency structure.
+The cost appears immediately at sampling time.
+
+### Sampling cost
+
+The forward pass (training) is fully parallel for both. The **inverse** pass (sampling)
+is not: AutoReg must evaluate its masked MLP once per parameter dimension per block,
+because $\theta_j$ cannot be computed until $\theta_{1..j-1}$ exist. Coupling inverts in
+a single vectorised sweep regardless of dimensionality.
+
+```{r inverse-cost}
+inv_cost <- function(d, n = 2000, n_layers = 4, reps = 3) {
+  cp <- probotMakeFlow(d, 9, n_layers, 64, device = "cpu")()
+  ar <- probotMakeFlow(d, 9, n_layers, 64, device = "cpu", style = "autoreg")()
+  z <- torch_randn(c(n, d)); cc <- torch_randn(c(n, 9))
+  tc <- min(vapply(seq_len(reps),
+                   function(i) system.time(with_no_grad(cp$inverse(z, cc)))[["elapsed"]], numeric(1)))
+  ta <- min(vapply(seq_len(reps),
+                   function(i) system.time(with_no_grad(ar$inverse(z, cc)))[["elapsed"]], numeric(1)))
+  data.frame(dim_theta = d, couple_sec = round(tc, 4),
+             autoreg_sec = round(ta, 4), ratio = round(ta / tc, 1))
+}
+
+ic <- do.call(rbind, lapply(c(2, 4, 8, 16, 32), inv_cost))
+ic
+```
+
+Coupling's inverse time is flat in `dim_theta` (overhead-bound at these sizes);
+AutoReg's grows roughly linearly, because the work is `n_blocks * dim_theta` masked
+network evaluations. The absolute ratios are CPU/overhead-dependent and will vary by
+machine and batch size — the *shape of the scaling* is the durable point.
+
+Note that `probotSamplePostNF()` batches the inverse pass, so the penalty is per
+*dimension*, not per observation: sampling 10,000 posterior draws for many observations
+at once amortises well, whereas sampling one observation at a time in an R loop
+compounds it.
+
+### Invertibility in practice
+
+Both architectures round-trip to float32 precision, and for both the error grows with
+depth — it is not a differentiator, but it is worth measuring when you push either
+architecture to many blocks.
+
+```{r round-trip}
+chk <- function(mdl, label) {
+  dev <- mdl$parameters[[1]]$device
+  tt <- torch_randn(c(500, 4), device = dev)
+  cc <- torch_randn(c(500, 9), device = dev)
+  with_no_grad({
+    f <- mdl$inverse(mdl(tt, cc)$z, cc)
+  })
+  data.frame(model = label, max_roundtrip_err = (f - tt)$abs()$max()$item())
+}
+
+rt <- do.call(rbind, lapply(c(2, 4, 8, 12), function(nl) {
+  rbind(
+    chk(probotMakeFlow(4, 9, n_layers = nl, hidden_dim = 64, device = "cpu")(), "couple"),
+    chk(probotMakeFlow(4, 9, n_layers = nl, hidden_dim = 64, device = "cpu",
+                       style = "autoreg")(), "autoreg")
+  ) |> transform(n_layers = nl)
+}))
+rt
+```
+
+Errors sit at the 1e-7 to 1e-6 level throughout — the expected noise floor for
+float32 arithmetic, rising gently as more transformation steps accumulate. The floor is
+backend-dependent: the same coupling round-trip on MPS measured roughly two orders of
+magnitude higher than on CPU. Use a round-trip check as a regression tripwire against
+your *own* baseline for a given backend rather than against a fixed universal number.
+
+### Default hyperparameters differ
+
+A genuine gotcha. `probotMakeFlow()` defaults to `hidden_dim = 32` and forwards it to
+whichever style you choose, but the underlying modules have different defaults:
+
+```{r defaults}
+formals(probotFlowCouple)[c("n_layers", "hidden_dim")]
+formals(probotFlowAutoReg)[c("n_blocks", "n_layers_per_block", "hidden_dim")]
+```
+
+When `probotMakeFlow(style = "autoreg")` is called, `n_layers` is mapped onto
+`n_blocks` and `n_layers_per_block` is fixed at 2. Calling `probotFlowAutoReg()`
+directly instead gives you `n_blocks = 5` and `hidden_dim = 500` — a substantially
+larger model than the facade's defaults.
+
+```{r default-sizes}
+n_par <- function(m) sum(vapply(m$parameters, function(p) prod(dim(p)), numeric(1)))
+
+data.frame(
+  route = c("probotMakeFlow(style = \"autoreg\")", "probotFlowAutoReg() direct"),
+  parameters = c(
+    n_par(probotMakeFlow(4, 9, device = "cpu", style = "autoreg")()),
+    n_par(probotFlowAutoReg(dim_theta = 4, dim_x = 9, device = "cpu"))
+  )
+)
+```
+
+That is a ~185x difference at the same nominal call shape. If you are comparing the
+two styles, set hyperparameters explicitly on both rather than trusting defaults —
+otherwise you are benchmarking model size, not architecture.
+
+---
+
+## A worked comparison
+
+The toy problem from *Going with the Flow*: two parameters `(u, v)` generate a
+nine-point polynomial curve, and we invert to recover the posterior over `(u, v)`.
+
+```{r toy-data, eval = TRUE}
+make_polynomial_output <- function(theta) {
+  a0 <- 0.3 + 0.8 * theta[, 1] - 0.4 * theta[, 2]
+  a1 <- -1.2 + 0.5 * theta[, 1]^2 + 0.7 * theta[, 2]
+  a2 <- 0.6 * sin(pi * theta[, 1]) - 0.3 * theta[, 2]^2
+  x_grid <- seq(-1, 1, length.out = 9)
+  y <- vapply(x_grid, function(x) a0 + a1 * x + a2 * x^2, numeric(nrow(theta)))
+  colnames(y) <- paste0("x", seq_along(x_grid))
+  y
+}
+
+n_train <- 20000
+theta_train <- cbind(u = runif(n_train, -1, 1), v = runif(n_train, -1, 1))
+x_train <- make_polynomial_output(theta_train)
+
+#Add a tiny bit of noise to prevent collapse:
+
+x_train[] = rnorm(n = length(x_train),
+                mean = x_train,
+                sd = diff(range(x_train))*1e-3)
+
+x_sc <- probotScaleForward(x_train)
+t_sc <- probotScaleForward(theta_train)
+```
+
+Train both styles with an explicit, identical budget — deliberately not the defaults,
+for the reason noted above.
+
+```{r train-both, eval = eval_train}
+train_style <- function(style, epochs = 200) {
+  dl <- probotDataLoader(input = x_sc, output = t_sc, batch = 1024)
+  mdl <- probotMakeFlow(dim_theta = 2, dim_x = 9, n_layers = 6,
+                        hidden_dim = 64, style = style)()
+  t0 <- Sys.time()
+  res <- probotTrainFlow(model = mdl, dataloader = dl,
+                         optimizer = optim_adam(mdl$parameters, lr = 1e-3),
+                         epochs = epochs, verbose = TRUE, early_stop = FALSE)
+  list(model = res$model, history = res$history$loss,
+       secs = as.numeric(difftime(Sys.time(), t0, units = "secs")))
+}
+
+torch_manual_seed(2517)
+fit_cp <- train_style("couple")
+torch_manual_seed(2517)
+fit_ar <- train_style("autoreg")
+
+fit_cp$secs; tail(fit_cp$history, 1)
+fit_ar$secs; tail(fit_ar$history, 1)
+```
+
+Compare training curves and posterior width on a held-out observation.
+
+```{r compare-plots, fig.width = 8, fig.height = 4, eval = eval_train}
+plot(seq_along(fit_cp$history), fit_cp$history, type = "l", col = "steelblue",
+     lwd = 2, ylim = range(c(fit_cp$history, fit_ar$history)),
+     xlab = "Epoch", ylab = "Mean NLL", main = "Training loss")
+lines(seq_along(fit_ar$history), fit_ar$history, col = "darkorange", lwd = 2)
+legend("bottomleft", legend = c("coupling", "autoreg"),
+       col = c("steelblue", "darkorange"), lwd = 2, bty = "n")
+```
+
+```{r posterior-width, fig.width = 8, fig.height = 4, eval = eval_train}
+obs <- x_sc[1, , drop = FALSE]
+s_cp <- probotSamplePostNF(input = obs, model = fit_cp$model, n_samples = 5000, dim_theta = 2,
+  col_means = attributes(t_sc)$col_scale$col_means,
+  col_sds = attributes(t_sc)$col_scale$col_sds)
+s_ar <- probotSamplePostNF(input = obs, model = fit_ar$model, n_samples = 5000, dim_theta = 2,
+  col_means = attributes(t_sc)$col_scale$col_means,
+  col_sds = attributes(t_sc)$col_scale$col_sds)
+
+par(mfrow = c(1, 2))
+for (j in 1:2) {
+  nm <- colnames(theta_train)[j]
+  magplot(density(s_cp[, j]), col = 'steelblue', xlab = nm, main = paste("posterior", nm), ylim=c(0,60))
+  lines(density(s_ar[, j]), col = 'darkorange', add = TRUE)
+  abline(v = theta_train[1, j], col = "red", lwd = 2, lty = 2)
+}
+legend("topright", legend = c("coupling", "autoreg", "truth"),
+       lty = c(1, 1, 2), col = c('steelblue', 'darkorange', "red"), bty = "n")
+```
+
+Both have found a reasonable posterior centred around the 'truth' but the autoreg is arguably better.
+
+**A caution on reading these plots.** Do not treat a narrower posterior as better.
+Narrower means more confident; whether that confidence is *earned* is a calibration
+question, answered by PIT and TARP (see *Going with the Flow* and the CRPS diagnostic
+vignette), not by width. In short-budget runs of the comparison above we observed
+AutoReg reaching a lower training NLL while producing visibly tighter posteriors — but
+at short budgets both styles under-covered held-out truth substantially, so neither
+result should be over-interpreted. Judge architectures on calibration diagnostics over
+a held-out sample, at a budget where the loss has genuinely plateaued, and compare
+wall-clock only on the inverse pass you actually run.
+
+---
+
+## Save, load, and the `flow_style` field
+
+Checkpoints record which architecture they came from, and `probotLoad()` uses it to
+rebuild the right skeleton automatically.
+
+```{r save-load}
+f <- tempfile(fileext = ".pt")
+mdl <- probotMakeFlow(dim_theta = 4, dim_x = 9, n_layers = 3, hidden_dim = 32,
+                      device = "cpu", style = "autoreg")()
+
+probotSave(model = mdl, filename = f, model_type = "flow",
+           dim_theta = 4, dim_x = 9, n_layers = 3, hidden_dim = 32)
+
+back <- probotLoad(f, device = "cpu")
+cat("reloaded class:", paste(class(back$model), collapse = ", "), "\n")
+unlink(f)
+```
+
+If you are opening a checkpoint written before `flow_style` was recorded, `probotLoad()`
+falls back to `"couple"` — which will silently build the wrong skeleton if the weights
+are actually autoregressive. Pass `flow_style = "autoreg"` explicitly for those legacy
+files, and confirm the reloaded class matches what you trained.
+
+---
+
+## When to use which
+
+**Start with `"couple"`.** It is the package default for defensible reasons: one
+vectorised inverse pass regardless of `dim_theta`, cheaper forward and inverse, fewer
+parameters, and a flat, predictable sampling runtime. For low-dimensional posteriors
+with modest correlation — and for any workflow where you sample in large batches or
+interactively — it is usually sufficient.
+
+**Reach for `"autoreg"` when:**
+
+- Your parameters have **strong, asymmetric dependencies** where $\theta_j$ genuinely depends on many of $\theta_{1..j-1}$, and coupling's fixed half-split struggles to express that in the layers you can afford.
+- You have **high `dim_theta`** and want richer per-dimension conditioning without stacking many coupling layers.
+- The posterior shape is systematically wrong with coupling — banana structures that shear in one direction only, or marginal widths that refuse to tighten while calibration stays healthy.
+- You can pay the sampling cost: inverse is ~`n_blocks * dim_theta` masked evaluations, so batch your `probotSamplePostNF()` calls rather than looping over observations in R.
+
+**Stay on `"couple"` when:**
+
+- `dim_theta` is small (roughly single-digit) — the coupling split is not a bottleneck at d = 2 or 3, and AutoReg buys you little.
+- You are sampling many observations interactively, or the posterior draws are consumed in a loop you cannot batch.
+- You want the shortest path to a stable, reproducible result with fewer moving parts.
+
+The heuristic: **coupling spends expressiveness at training time to buy speed at
+sampling time; AutoReg buys expressiveness at the price of a sequential inverse.** If
+you are unsure, train both on the same explicit hyperparameters, compare PIT/TARP
+calibration on held-out data, and let the diagnostics decide.
+
+---
+
+## Summary
+
+| | `style = "couple"` | `style = "autoreg"` |
+|---|---|---|
+| Module | `probotFlowCouple()` | `probotFlowAutoReg()` |
+| Per-layer conditioning | Other half of `theta` + `x` | Full prefix `theta_{1..j-1}` + `x` |
+| Mixing mechanism | Half-swap | `torch_flip` permutation between blocks |
+| Forward pass | Parallel | Parallel |
+| Inverse pass | Single sweep, flat in `dim_theta` | `n_blocks * dim_theta` masked passes |
+| Facade defaults | `n_layers = 4`, `hidden_dim = 32` | `n_blocks` from `n_layers`, `n_layers_per_block = 2` |
+| Round-trip error | ~1e-7 to 1e-6 (float32 floor) | ~1e-7 to 1e-6; both grow with depth |
+| Best for | Fast sampling, low-d, stable runs | Strong sequential dependence, higher d |
+| Watch out for | Half-split misses within-half dependencies | Slow unbatched sampling; ordering effects |
