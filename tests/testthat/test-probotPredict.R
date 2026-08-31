@@ -101,6 +101,58 @@ test_that("probotMarginalPostMDN sets column names", {
   expect_equal(colnames(res$post_sd), names)
 })
 
+test_that("probotSamplePostMDN soft-clamps log10_sigma to [-5, 5]", {
+  # A single-component MDN with log10_sigma = 8 would sample from N(0, 1e8)
+  # without clamping. Training/loss clamp log10_sigma to [-5, 5], so the
+  # sampler must cap sigma at 1e5 and the sample SD should land near 1e5
+  # (a hundred-fold separation from the unclamped 1e8).
+  set.seed(7)
+  o <- list(
+    mu = torch_tensor(array(0, c(1, 1, 1))),
+    log10_sigma = torch_tensor(array(8, c(1, 1, 1))),
+    logits = torch_tensor(matrix(0, 1, 1))
+  )
+  n_samples <- 1e5
+  samples <- probotSamplePostMDN(o, index = 1, n_samples = n_samples,
+                                  col_means = 0, col_sds = 1)
+  # The clamp is what this test is for: capped sigma = 1e5, not 1e8.
+  expect_true(sd(samples) > 0.8e5 & sd(samples) < 1.2e5)
+  # Sanity: sampling around 0, within a few Monte Carlo standard errors
+  # (SE of the mean = sigma / sqrt(n) ~ 316 here).
+  se <- 1e5 / sqrt(n_samples)
+  expect_lt(abs(mean(samples)), 6 * se)
+})
+
+test_that("probotMarginalPostMDN soft-clamps log10_sigma to [-5, 5]", {
+  # log10_sigma = 8 (sigma = 1e8) must be clamped to sigma = 1e5; the
+  # analytic marginal SD is exactly that (weights = 1, mu = 0). The lower
+  # bound (-5) is checked the same way.
+  o_hi <- list(
+    mu = torch_tensor(array(0, c(1, 1, 1))),
+    log10_sigma = torch_tensor(array(8, c(1, 1, 1))),
+    logits = torch_tensor(matrix(0, 1, 1))
+  )
+  res <- probotMarginalPostMDN(o_hi, col_means = 0, col_sds = 1)
+  expect_equal(res$post_sd[1, 1], 1e5)
+
+  o_lo <- list(
+    mu = torch_tensor(array(0, c(1, 1, 1))),
+    log10_sigma = torch_tensor(array(-8, c(1, 1, 1))),
+    logits = torch_tensor(matrix(0, 1, 1))
+  )
+  res_lo <- probotMarginalPostMDN(o_lo, col_means = 0, col_sds = 1)
+  expect_equal(res_lo$post_sd[1, 1], 1e-5)
+
+  # An in-range value must pass through unchanged (sigma = 10^0.5).
+  o_mid <- list(
+    mu = torch_tensor(array(0, c(1, 1, 1))),
+    log10_sigma = torch_tensor(array(0.5, c(1, 1, 1))),
+    logits = torch_tensor(matrix(0, 1, 1))
+  )
+  res_mid <- probotMarginalPostMDN(o_mid, col_means = 0, col_sds = 1)
+  expect_equal(res_mid$post_sd[1, 1], 10^0.5, tolerance = 1e-6)
+})
+
 # --- Point prediction tests ---
 setup_point <- function() {
   set.seed(42)

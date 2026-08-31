@@ -36,7 +36,7 @@ probotPIT(
 probotTARP(
   mdn_output,
   params,
-  n_test = 1e4,
+  n_test = NULL,
   n_samples = 1e4,
   col_means,
   col_sds,

@@ -46,8 +46,9 @@ probotTrainMDN(model, dataloader, optimizer, epochs = 100, mdn_components,
 }
 \details{
 Training metrics include loss, MAE, RMSE, average sigma, and average mixture
-weights. Early stopping compares mean loss over the latest
-\code{stop_window} epochs to the previous window.
+weights. MAE and RMSE are element-wise means over all target elements
+(\eqn{N \times ncol(y)}), not per-row means. Early stopping compares mean
+loss over the latest \code{stop_window} epochs to the previous window.
 }
 \value{
 \itemize{

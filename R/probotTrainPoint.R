@@ -4,7 +4,8 @@ probotSingleEpochPoint <- function(model, dataloader, optimizer, loss_fn = nnf_m
   running_mae <- 0
   running_rmse <- 0
   n_batches <- 0
-  
+  n_elems <- 0
+
   coro::loop(for (batch in dataloader) {
     optimizer$zero_grad()
     output_pred <- model(batch[[1]])
@@ -25,12 +26,15 @@ probotSingleEpochPoint <- function(model, dataloader, optimizer, loss_fn = nnf_m
     running_mae <- running_mae + diff$sum()$item()
     running_rmse <- running_rmse + ((batch[[2]] - output_pred)^2)$sum()$item()
     n_batches <- n_batches + 1
+    # MAE/RMSE are element-wise: count target elements, not rows, so the
+    # reported values stay correct for multivariate targets.
+    n_elems <- n_elems + batch[[2]]$numel()
   })
-  
+
   list(
     loss = running_loss / length(dataloader$dataset),
-    mae = running_mae / length(dataloader$dataset),
-    rmse = sqrt(running_rmse / length(dataloader$dataset))
+    mae = running_mae / n_elems,
+    rmse = sqrt(running_rmse / n_elems)
   )
 }
 

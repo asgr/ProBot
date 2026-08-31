@@ -55,12 +55,18 @@ probotSamplePostMDN <- function(
     ]
   )
 
-  sigma <- 10^as.matrix(
-    mdn_output$log10_sigma[
-      index,
-      1:mdn_components,
-      1:n_dim
-    ]
+  sigma <- 10^pmin(
+    pmax(
+      as.matrix(
+        mdn_output$log10_sigma[
+          index,
+          1:mdn_components,
+          1:n_dim
+        ]
+      ),
+      -5
+    ),
+    5
   )
 
   comp <- sample(
@@ -117,7 +123,7 @@ probotMarginalPostMDN = function(mdn_output,
 
   mu <- as.array(mdn_output$mu)
 
-  sigma <- 10^as.array(mdn_output$log10_sigma)
+  sigma <- 10^pmin(pmax(as.array(mdn_output$log10_sigma), -5), 5)
 
   # ======================================================
   # Posterior mean

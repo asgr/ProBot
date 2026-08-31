@@ -3,7 +3,8 @@ probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components,
   model$train()
   running_loss <- 0; running_mae <- 0; running_rmse <- 0
   running_sigma <- 0; running_mix <- numeric(mdn_components); n_batches <- 0
-  
+  n_elems <- 0
+
   coro::loop(for (batch in dataloader) {
     optimizer$zero_grad()
     output_pred <- model(batch[[1]])
@@ -40,7 +41,10 @@ probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components,
     running_loss <- running_loss + current_loss$item() * batch[[1]]$size(1)
     running_mae <- running_mae + torch::torch_abs(batch[[2]] - mu_mix)$sum()$item()
     running_rmse <- running_rmse + ((batch[[2]] - mu_mix)^2)$sum()$item()
-    
+    # MAE/RMSE are element-wise: count target elements, not rows, so the
+    # reported values stay correct for multivariate targets.
+    n_elems <- n_elems + batch[[2]]$numel()
+
     # Sigma/Mix tracking (unchanged)
     mean_sigma <- (10^torch_clamp(p$log10_sigma, min = -5, max = 5))$mean()$item()
     mix_use <- apply(as.array(weights), 2, mean)
@@ -51,8 +55,8 @@ probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components,
   
   list(
     loss = running_loss / length(dataloader$dataset),
-    mae = running_mae / length(dataloader$dataset),
-    rmse = sqrt(running_rmse / length(dataloader$dataset)),
+    mae = running_mae / n_elems,
+    rmse = sqrt(running_rmse / n_elems),
     sigma = running_sigma / n_batches,
     mix = running_mix / n_batches,
     mix_sd = sd(running_mix / n_batches)

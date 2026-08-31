@@ -23,7 +23,7 @@ probotPIT <- function(
     n_params
   )
 
-  for(i in 1:n_test){
+  for(i in seq_len(n_test)){
 
     samples <- probotSamplePostMDN(
       mdn_output,
@@ -51,7 +51,7 @@ probotPIT <- function(
 probotTARP <- function(
     mdn_output,
     params,
-    n_test = 1e4,
+    n_test = NULL,
     n_samples = 1e4,
     col_means,
     col_sds,
@@ -67,7 +67,7 @@ probotTARP <- function(
   
   tarp <- numeric(n_test)
   
-  for(i in 1:n_test){
+  for(i in seq_len(n_test)){
     
     samples <- probotSamplePostMDN(
       mdn_output,

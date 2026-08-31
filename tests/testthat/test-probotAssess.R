@@ -72,6 +72,38 @@ test_that("probotTARP caps n_test to nrow(params)", {
   expect_equal(length(tarp), s$n_test)
 })
 
+test_that("probotTARP defaults to all rows (n_test = NULL)", {
+  # Regression: the old default n_test = 1e4 silently truncated, so a 200-row
+  # params matrix still returned 1e4 TARP values. The NULL default must use
+  # every row.
+  s <- setup_assess(n_test = 200, n_samples = 20)
+  tarp <- probotTARP(s$out, s$params, n_samples = s$n_samples,
+                      col_means = s$col_means, col_sds = s$col_sds,
+                      verbose = FALSE)
+
+  expect_equal(length(tarp), 200)
+})
+
+test_that("probotPIT/probotTARP/probotCRPS handle n_test = 0 without crashing", {
+  # 1:0 evaluates to c(1, 0) and the loop iterated i = 0 -> subscript error.
+  s <- setup_assess(n_test = 3, n_samples = 100)
+
+  pit <- probotPIT(s$out, s$params, n_test = 0, n_samples = s$n_samples,
+                    col_means = s$col_means, col_sds = s$col_sds,
+                    verbose = FALSE)
+  expect_equal(dim(pit), c(0L, s$output_dim))
+
+  tarp <- probotTARP(s$out, s$params, n_test = 0, n_samples = s$n_samples,
+                      col_means = s$col_means, col_sds = s$col_sds,
+                      verbose = FALSE)
+  expect_equal(length(tarp), 0)
+
+  crps <- probotCRPS(s$out, s$params, n_test = 0, n_samples = s$n_samples,
+                      col_means = s$col_means, col_sds = s$col_sds,
+                      verbose = FALSE)
+  expect_equal(dim(crps), c(0L, s$output_dim))
+})
+
 test_that("probotCRPS returns non-negative values", {
   s <- setup_assess(n_test = 3, n_samples = 200)
   crps <- probotCRPS(s$out, s$params, n_test = s$n_test, n_samples = s$n_samples,
