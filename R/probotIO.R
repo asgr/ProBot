@@ -18,6 +18,8 @@ probotSave <- function(
     n_layers = NULL,
     hidden_dim = NULL,
     hidden_dims = NULL,
+    n_blocks = NULL,
+    n_layers_per_block = NULL,
     activation_name = NULL,
     dropout = NULL,
     soft_clamp = NULL,
@@ -76,6 +78,8 @@ probotSave <- function(
       n_layers        = n_layers,
       hidden_dim      = hidden_dim,
       hidden_dims     = hidden_dims,
+      n_blocks        = n_blocks,
+      n_layers_per_block = n_layers_per_block,
       activation      = activation_name,
       dropout         = dropout,
       soft_clamp      = soft_clamp,
@@ -216,6 +220,8 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
       dim_x       = meta$dim_x,
       n_layers    = if (!is.null(meta$n_layers)) meta$n_layers else 4,
       hidden_dim  = if (!is.null(meta$hidden_dim)) meta$hidden_dim else 32,
+      n_blocks  = if (!is.null(meta$n_blocks)) meta$n_blocks else 5,
+      n_layers_per_block = if (!is.null(meta$n_layers_per_block)) meta$n_layers_per_block else 2,
       soft_clamp  = if (!is.null(meta$soft_clamp)) meta$soft_clamp else 3,
       # Priority: explicit override > saved metadata > "couple" (legacy default).
       style       = if (!is.null(flow_style)) flow_style else

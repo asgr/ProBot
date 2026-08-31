@@ -11,14 +11,9 @@ permutation layers (\code{style = "autoreg"}). See \code{details} for a
 comparison and guidance on choosing between them.
 }
 \usage{
-probotMakeFlow(
-  dim_theta,
-  dim_x,
-  n_layers = 4,
-  hidden_dim = 32,
-  soft_clamp = 3,
-  device = NULL,
-  style = "couple"
+probotMakeFlow(dim_theta, dim_x,
+  n_layers = 4, hidden_dim = 32, n_blocks = 5, n_layers_per_block = 2
+  soft_clamp = 3, device = NULL, style = "couple"
 )
 }
 \arguments{
@@ -27,8 +22,7 @@ probotMakeFlow(
     \item{dim_x}{Dimensionality of the context/input features used to
     condition the flow.}
 
-    \item{n_layers}{Number of coupling layers to stack, or autoregressive
-    blocks when \code{style = "autoreg"}. Defaults to 4.}
+    \item{n_layers}{Number of coupling layers to stack. Defaults to 4.}
 
     \item{hidden_dim}{Number of units in each hidden layer of the internal
     shift/scale network within each coupling layer, or of the masked MLP in
@@ -37,6 +31,10 @@ probotMakeFlow(
     \code{\link{probotFlowCouple}} or
     \code{\link{probotFlowAutoReg}} directly instead uses their own
     defaults (32 and 500 respectively).}
+
+    \item{n_blocks}{Number of autoregressive blocks when \code{style = "autoreg"}}
+
+    \item{n_layers_per_block}{Number of layers per block when \code{style = "autoreg"}}
 
     \item{soft_clamp}{Upper bound on the magnitude of the log-scale, applied
     via a soft \eqn{\tanh} clamp so the scale stays bounded. Larger values

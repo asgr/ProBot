@@ -306,6 +306,7 @@ probotFlowCouple <- nn_module(
 )
 
 probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
+                           n_blocks = 5, n_layers_per_block = 2,
                            soft_clamp = 3, device = NULL, style = "couple", ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
@@ -324,7 +325,7 @@ probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
       # hidden_dim is passed through untouched (no clamping) so that a
       # save -> load round trip reconstructs the exact architecture.
       autoreg = probotFlowAutoReg(
-        dim_theta = dim_theta, dim_x = dim_x, n_blocks = n_layers,
+        dim_theta = dim_theta, dim_x = dim_x, n_blocks = n_blocks,
         n_layers_per_block = 2, hidden_dim = hidden_dim,
         soft_clamp = soft_clamp, device = device
       )
