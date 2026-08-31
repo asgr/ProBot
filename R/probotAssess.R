@@ -117,8 +117,7 @@ probotCRPS <- function(
   
   crps <- matrix(NA_real_, n_test, n_params)
   
-  # Weights for the sorted-sample penalty term: (2k - S - 1) / (2 * S^2)
-  w <- (2:(n_samples + 1L) - (n_samples + 1)) / (2 * n_samples^2)
+  w <- .probotCRPSWeights(n_samples)
   
   for(i in seq_len(n_test)){
     
@@ -132,16 +131,28 @@ probotCRPS <- function(
     )
     
     for(j in seq_len(n_params)){
-      z <- sort(samples[, j])
-      crps[i, j] <- mean(abs(params[i, j] - samples[, j])) - sum(w * z)
+      crps[i, j] <- .probotCRPSSample(samples[, j], params[i, j], w)
     }
-    
+
     if(verbose && i %% 1000 == 0)
       cat(i, "\n")
   }
-  
+
   colnames(crps) <- col_names
-  
+
   return(crps)
+}
+
+# Weights for the sorted-sample penalty term (2k - S - 1) / S^2.
+# The CRPS estimator's spread term is
+#   (1/(2 S^2)) * sum_i sum_j |z_i - z_j|,
+# which for sorted z equals sum_k ((2k - S - 1) / S^2) * z_(k).
+.probotCRPSWeights = function(n_samples) {
+  (2 * seq_len(n_samples) - (n_samples + 1L)) / n_samples^2
+}
+
+# CRPS for a single parameter dimension from posterior samples.
+.probotCRPSSample = function(samples, y, w) {
+  mean(abs(y - samples)) - sum(w * sort(samples))
 }
 

@@ -90,3 +90,70 @@ test_that("probotCRPS sets column names", {
 
   expect_equal(colnames(crps), s$col_names)
 })
+
+# Brute-force CRPS from the sample estimator definition:
+#   mean|z - y| - (1/(2 S^2)) * sum_i sum_j |z_i - z_j|
+crps_brute_force <- function(samples, y) {
+  S <- length(samples)
+  mean(abs(samples - y)) -
+    sum(outer(samples, samples, function(a, b) abs(a - b))) / (2 * S^2)
+}
+
+test_that("probotCRPS matches the brute-force double-sum estimator", {
+  # Fixed samples cover the weight formula independently of the (random)
+  # sampler: the sorted-sample penalty must equal the brute-force double sum.
+  set.seed(17)
+  S <- 300
+  z <- rnorm(S)
+  w <- ProBot:::.probotCRPSWeights(S)
+
+  expect_equal(
+    sum(w * sort(z)),
+    sum(outer(z, z, function(a, b) abs(a - b))) / (2 * S^2),
+    tolerance = 1e-12
+  )
+
+  # Full estimator: mean absolute error minus the spread penalty.
+  y <- 0.3
+  expect_equal(
+    ProBot:::.probotCRPSSample(z, y, w),
+    crps_brute_force(z, y),
+    tolerance = 1e-12
+  )
+
+  # Spot-check at other sample sizes (weights scale as 1/S^2).
+  for (S in c(5L, 100L, 1000L)) {
+    z <- rnorm(S)
+    w <- ProBot:::.probotCRPSWeights(S)
+    expect_equal(
+      ProBot:::.probotCRPSSample(z, 0, w),
+      crps_brute_force(z, 0),
+      tolerance = 1e-12
+    )
+  }
+
+  # End-to-end with a deterministic reference: a single-component unit-Gaussian
+  # MDN (mu = 10, log10_sigma = 0) with col_means = 0, col_sds = 1 samples
+  # from N(10, 1) — no un-scaling. It must reproduce the analytic CRPS of
+  # the normal distribution,
+  #   CRPS = E|Z - t| - 1/sqrt(pi),
+  #   E|Z - t| = 2*phi(t-mu) + (t-mu) * (2*Phi(t-mu) - 1)  (sigma = 1)
+  # with only Monte Carlo noise (a few parts in 1e-3 at S = 1e4). This
+  # exercises the weight formula through the real probotCRPS() +
+  # probotSamplePostMDN() path; the previous halved weights would be off by
+  # 1/(2*sqrt(pi)) ~ 0.28 (>> MC noise).
+  o_det <- list(
+    mu = torch_tensor(array(10, c(3, 1, 1))),
+    log10_sigma = torch_tensor(array(0, c(3, 1, 1))),
+    logits = torch_tensor(matrix(0, 3, 1))
+  )
+  truth <- c(10, 10.3, 15)
+  crps_det <- probotCRPS(o_det, matrix(truth, 3, 1), n_samples = 1e4,
+                         col_means = 0, col_sds = 1, verbose = FALSE)
+
+  Eabs <- function(t, mu) 2 * dnorm(t - mu) + (t - mu) * (2 * pnorm(t - mu) - 1)
+  for (k in 1:3) {
+    expect_equal(crps_det[k, 1], Eabs(truth[k], 10) - 1 / sqrt(pi),
+                 tolerance = 0.05)
+  }
+})
