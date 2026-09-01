@@ -305,15 +305,190 @@ probotFlowCouple <- nn_module(
   }
 )
 
+.probotRationalQuadraticSpline <- function(input, widths, heights, derivatives,
+                                          inverse = FALSE, tail_bound = 3) {
+  # `input`, widths, heights, and derivatives have shapes (batch, features)
+  # and (batch, features, bins), respectively.  The spline is the identity
+  # outside [-tail_bound, tail_bound].
+  n_bins <- widths$size(3)
+  batch_size <- input$size(1)
+  n_features <- input$size(2)
+  device <- input$device
+  dtype <- input$dtype
+
+  left_edges <- torch_cat(list(
+    torch_full(c(batch_size, n_features, 1), -tail_bound, dtype = dtype, device = device),
+    -tail_bound + torch_cumsum(widths, dim = 3)$narrow(3, 1, n_bins - 1)
+  ), dim = 3)
+  bottom_edges <- torch_cat(list(
+    torch_full(c(batch_size, n_features, 1), -tail_bound, dtype = dtype, device = device),
+    -tail_bound + torch_cumsum(heights, dim = 3)$narrow(3, 1, n_bins - 1)
+  ), dim = 3)
+
+  coordinate <- if (inverse) bottom_edges else left_edges
+  coordinate_next <- coordinate + if (inverse) heights else widths
+  expanded_input <- input$unsqueeze(3)
+  bin_mask <- (expanded_input >= coordinate) & (expanded_input < coordinate_next)
+  bin_mask <- bin_mask$to(dtype = dtype)
+
+  select_bin <- function(values) (values * bin_mask)$sum(dim = 3)
+  widths_bin <- select_bin(widths)
+  heights_bin <- select_bin(heights)
+  left_bin <- select_bin(left_edges)
+  bottom_bin <- select_bin(bottom_edges)
+  derivatives_left <- select_bin(derivatives$narrow(3, 1, n_bins))
+  derivatives_right <- select_bin(derivatives$narrow(3, 2, n_bins))
+  delta <- heights_bin / widths_bin
+  inside <- (input > -tail_bound) & (input < tail_bound)
+
+  if (inverse) {
+    y_minus_bottom <- input - bottom_bin
+    a <- y_minus_bottom * (derivatives_left + derivatives_right - 2 * delta) +
+      heights_bin * (delta - derivatives_left)
+    b <- heights_bin * derivatives_left -
+      y_minus_bottom * (derivatives_left + derivatives_right - 2 * delta)
+    c <- -delta * y_minus_bottom
+    discriminant <- torch_clamp(b^2 - 4 * a * c, min = 0)
+    root <- (2 * c) / (-b - torch_sqrt(discriminant))
+    result <- left_bin + root * widths_bin
+    return(torch_where(inside, result, input))
+  }
+
+  theta <- (input - left_bin) / widths_bin
+  theta_one_minus <- theta * (1 - theta)
+  numerator <- heights_bin * (delta * theta^2 + derivatives_left * theta_one_minus)
+  denominator <- delta +
+    (derivatives_right + derivatives_left - 2 * delta) * theta_one_minus
+  result <- bottom_bin + numerator / denominator
+  derivative_numerator <- delta^2 * (
+    derivatives_right * theta^2 + 2 * delta * theta_one_minus +
+      derivatives_left * (1 - theta)^2
+  )
+  logabsdet <- torch_log(derivative_numerator) - 2 * torch_log(denominator)
+  logabsdet <- torch_where(inside, logabsdet, torch_zeros_like(logabsdet))
+
+  list(output = torch_where(inside, result, input), logabsdet = logabsdet)
+}
+
+.probotSplineCouplingLayer <- nn_module(
+  initialize = function(dim_theta, dim_x, hidden_dim = 32, n_bins = 8,
+                        tail_bound = 3, device = NULL) {
+    self$d1 <- floor(dim_theta / 2)
+    self$d2 <- dim_theta - self$d1
+    if (self$d1 < 1 || self$d2 < 1) {
+      stop("'dim_theta' must be >= 2 for Neural Spline Flows", call. = FALSE)
+    }
+    if (n_bins < 2 || n_bins != as.integer(n_bins)) {
+      stop("'n_bins' must be an integer of at least 2", call. = FALSE)
+    }
+    if (!is.numeric(tail_bound) || length(tail_bound) != 1 || tail_bound <= 0) {
+      stop("'tail_bound' must be a positive number", call. = FALSE)
+    }
+    self$n_bins <- as.integer(n_bins)
+    self$tail_bound <- tail_bound
+    self$min_bin_width <- 1e-3
+    self$min_bin_height <- 1e-3
+    self$min_derivative <- 1e-3
+    self$conditioner <- nn_sequential(
+      nn_linear(self$d1 + dim_x, hidden_dim),
+      nn_gelu(),
+      nn_linear(hidden_dim, hidden_dim),
+      nn_gelu(),
+      nn_linear(hidden_dim, self$d2 * (3 * self$n_bins - 1))
+    )
+    self$to(device = .probotChooseDevice(device))
+  },
+
+  spline_params = function(condition, device, dtype) {
+    raw <- self$conditioner(condition)$view(c(-1, self$d2, 3 * self$n_bins - 1))
+    raw_widths <- raw$narrow(3, 1, self$n_bins)
+    raw_heights <- raw$narrow(3, self$n_bins + 1, self$n_bins)
+    raw_derivatives <- raw$narrow(3, 2 * self$n_bins + 1, self$n_bins - 1)
+    widths <- self$min_bin_width +
+      (2 * self$tail_bound - self$min_bin_width * self$n_bins) *
+      torch_softmax(raw_widths, dim = 3)
+    heights <- self$min_bin_height +
+      (2 * self$tail_bound - self$min_bin_height * self$n_bins) *
+      torch_softmax(raw_heights, dim = 3)
+    derivatives <- self$min_derivative + nnf_softplus(raw_derivatives)
+    boundary <- torch_ones(c(raw$size(1), self$d2, 1), dtype = dtype, device = device)
+    list(
+      widths = widths,
+      heights = heights,
+      derivatives = torch_cat(list(boundary, derivatives, boundary), dim = 3)
+    )
+  },
+
+  forward = function(theta, x) {
+    theta_1 <- theta$narrow(2, 1, self$d1)
+    theta_2 <- theta$narrow(2, self$d1 + 1, self$d2)
+    params <- self$spline_params(torch_cat(list(theta_1, x), dim = 2),
+                                theta$device, theta$dtype)
+    spline <- .probotRationalQuadraticSpline(
+      theta_2, params$widths, params$heights, params$derivatives,
+      tail_bound = self$tail_bound
+    )
+    list(
+      z = torch_cat(list(spline$output, theta_1), dim = 2),
+      log_det_jac = spline$logabsdet$sum(dim = 2, keepdim = TRUE)
+    )
+  },
+
+  inverse = function(z, x) {
+    z_2 <- z$narrow(2, 1, self$d2)
+    z_1 <- z$narrow(2, self$d2 + 1, self$d1)
+    params <- self$spline_params(torch_cat(list(z_1, x), dim = 2), z$device, z$dtype)
+    theta_2 <- .probotRationalQuadraticSpline(
+      z_2, params$widths, params$heights, params$derivatives,
+      inverse = TRUE, tail_bound = self$tail_bound
+    )
+    torch_cat(list(z_1, theta_2), dim = 2)
+  }
+)
+
+probotFlowNSF <- nn_module(
+  "probotFlowNSF",
+  initialize = function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
+                        n_bins = 8, tail_bound = 3, device = NULL) {
+    self$n_layers <- n_layers
+    for (i in seq_len(n_layers)) {
+      self[[paste0("spline_layer_", i)]] <- .probotSplineCouplingLayer(
+        dim_theta, dim_x, hidden_dim, n_bins, tail_bound, device
+      )
+    }
+    self$to(device = .probotChooseDevice(device))
+  },
+
+  forward = function(theta, x) {
+    z <- theta
+    log_det_jac <- torch_zeros(c(theta$size(1), 1), device = theta$device)
+    for (i in seq_len(self$n_layers)) {
+      out <- self[[paste0("spline_layer_", i)]]$forward(z, x)
+      z <- out$z
+      log_det_jac <- log_det_jac + out$log_det_jac
+    }
+    list(z = z, log_det_jac = log_det_jac)
+  },
+
+  inverse = function(z, x) {
+    theta <- z
+    for (i in rev(seq_len(self$n_layers))) {
+      theta <- self[[paste0("spline_layer_", i)]]$inverse(theta, x)
+    }
+    theta
+  }
+)
+
 probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
                            n_blocks = 5, n_layers_per_block = 2,
-                           soft_clamp = 3, device = NULL, style = "couple", ...) {
+                           soft_clamp = 3, n_bins = 8, tail_bound = 3,
+                           device = NULL, style = "couple", ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
   # Disambiguates the two flow architectures:
   #   style = "couple"    -> stacked affine NVP coupling layers (default)
   #   style = "autoreg"   -> masked autoregressive blocks + permutation layers
-  match.arg(style, c("couple", "autoreg"))
+  match.arg(style, c("couple", "autoreg", "nsf"))
   function() {
     # Calling a named nn_module with its constructor args already returns an
     # instantiated module, so no trailing `()` is added here.
@@ -328,6 +503,11 @@ probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
         dim_theta = dim_theta, dim_x = dim_x, n_blocks = n_blocks,
         n_layers_per_block = 2, hidden_dim = hidden_dim,
         soft_clamp = soft_clamp, device = device
+      ),
+      nsf = probotFlowNSF(
+        dim_theta = dim_theta, dim_x = dim_x, n_layers = n_layers,
+        hidden_dim = hidden_dim, n_bins = n_bins, tail_bound = tail_bound,
+        device = device
       )
     )
   }
