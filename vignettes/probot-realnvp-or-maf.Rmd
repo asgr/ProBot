@@ -1,8 +1,8 @@
 ---
-title: "ProBot: Coupling or AutoReg? Choosing a Flow Architecture"
+title: "ProBot: RealNVP or MAF? Choosing a Flow Architecture"
 output: rmarkdown::html_vignette
 vignette: >
-  %\VignetteIndexEntry{ProBot: Coupling or AutoReg? Choosing a Flow Architecture}
+  %\VignetteIndexEntry{ProBot: RealNVP or MAF? Choosing a Flow Architecture}
   %\VignetteEngine{knitr::rmarkdown}
   %\VignetteEncoding{UTF-8}
 ---
@@ -21,10 +21,10 @@ eval_train <- FALSE
 ## Overview
 
 The *Going with the Flow* vignette introduces normalising flows in general and walks
-through the coupling (RealNVP) architecture end to end. This vignette answers a
+through the Real Non-Volume Preserving (RealNVP) architecture end to end. This vignette answers a
 narrower question that comes up every time you call `probotMakeFlow()`:
 
-**should `style` be `"couple"` or `"autoreg"`?**
+**should `style` be `"realnvp"` or `"maf"`?**
 
 ProBot ships two conditional flow architectures behind that one facade. They share
 the same training loop (`probotTrainFlow()`), the same loss (`probotLossNF()`), the
@@ -45,9 +45,9 @@ Everything below concerns *how* $f$ is built.
 
 ## The two architectures
 
-### Coupling: `style = "couple"`
+### Real Non-Volume Preserving (RealNVP): `style = "realnvp"`
 
-`.probotCouplingLayer` splits the parameter vector into two halves and transforms one
+`.probotRealNVPLayer` splits the parameter vector into two halves and transforms one
 half conditioned on the other:
 
 1. Split $\theta = (\theta_1, \theta_2)$ at `d1 = floor(dim_theta / 2)`.
@@ -56,11 +56,12 @@ half conditioned on the other:
 4. Swap the halves, so the next layer transforms the complementary subset.
 
 The Jacobian is triangular, so $\log|\det J|$ is just `log_scale summed over the
-transformed dimensions`. `probotFlowCouple` stacks `n_layers` of these.
+transformed dimensions`. `probotFlowRealNVP` stacks `n_layers` of these.
 
-### AutoReg: `style = "autoreg"`
+### Masked Autoregressive Flows (MAF): `style = "maf"`
 
-`.probotFlowAutoRegBlock` implements a masked autoregressive flow (MAF). Instead of a
+`.probotMAFBlock` implements a flow from the Masked Autoregressive Flows (MAF)
+family. Instead of a
 fixed half-split, a degree-based mask enforces a *sequential* dependency structure:
 
 $$
@@ -71,7 +72,7 @@ The mask is built once at construction time and registered as a buffer, applied 
 weights at every forward pass. The first hidden layer uses a strict `>` comparison so a
 hidden node at degree $k$ cannot see $\theta_k$ itself; later layers use `>=` to let the
 chain propagate. Conditioning context `x` is given degree 0, so it is visible everywhere.
-`probotFlowAutoReg` stacks `n_blocks` such blocks with a `torch_flip` permutation layer
+`probotFlowMAF` stacks `n_blocks` such blocks with a `torch_flip` permutation layer
 between them, reversing the parameter order so successive blocks condition in opposite
 directions.
 
@@ -79,14 +80,14 @@ The distinction is easiest to see by comparing what each layer conditions on for
 four-dimensional parameter vector:
 
 ```
-coupling (split at d1 = 2)            autoreg (prefix conditioning)
+RealNVP (split at d1 = 2)            maf (prefix conditioning)
   theta_1, theta_2 pass through         x             -> shift/scale for theta_1
   (theta_1, x) -> transform theta_2    theta_1, x    -> shift/scale for theta_2
   next layer swaps the halves         theta_1:2, x   -> shift/scale for theta_3
                                         theta_1:3, x   -> shift/scale for theta_4
 ```
 
-Coupling asks "given half the vector, how should I distort the other half?" AutoReg
+RealNVP asks "given half the vector, how should I distort the other half?" MAF
 asks "given everything before this dimension, how should I transform this dimension?"
 
 ---
@@ -109,8 +110,8 @@ without touching any other part of your workflow.
 
 ### Parameter count
 
-AutoReg's conditioner must produce shift/log-scale for *every* dimension, for every
-degree, from a fully masked dense layer. Coupling's conditioner only produces outputs
+MAF's conditioner must produce shift/log-scale for *every* dimension, for every
+degree, from a fully masked dense layer. RealNVP's conditioner only produces outputs
 for half the dimensions, from a narrower input. The gap widens with `dim_theta`.
 
 ```{r param-counts}
@@ -120,8 +121,8 @@ pc <- do.call(rbind, lapply(c(2, 4, 8, 16), function(d) {
   cp <- probotMakeFlow(dim_theta = d, dim_x = 9, n_layers = 6,
                        hidden_dim = 64, device = "cpu")()
   ar <- probotMakeFlow(dim_theta = d, dim_x = 9, n_layers = 6,
-                       hidden_dim = 64, device = "cpu", style = "autoreg")()
-  data.frame(dim_theta = d, couple = n_par(cp), autoreg = n_par(ar),
+                       hidden_dim = 64, device = "cpu", style = "maf")()
+  data.frame(dim_theta = d, realnvp = n_par(cp), maf = n_par(ar),
              ratio = round(n_par(ar) / n_par(cp), 2))
 }))
 pc
@@ -134,44 +135,44 @@ even at 16 dimensions — parameter count is *not* the interesting difference.
 
 This is the substantive trade-off.
 
-| | Coupling | AutoReg |
+| | RealNVP | MAF |
 |---|---|---|
 | What conditions the transform of $\theta_j$ | The *other half* of $\theta$, fixed by `d1` | *All* $\theta_{1..j-1}$, plus $x$ |
 | Dependency depth for one dimension | 1 layer per half, alternating | Full prefix, every block |
 | Partition | Fixed 50/50 split | Ordered prefix |
 | Caveat | Components of the transformed half are updated independently of one another within a layer | Ordering matters; `torch_flip` between blocks mitigates it |
 
-A coupling layer at a single split cannot model within-half dependencies in one pass —
+A RealNVP layer at a single split cannot model within-half dependencies in one pass —
 it needs the swap and a second layer. The autoregressive block gets the full prefix in
-one pass. So for a fixed layer budget, AutoReg expresses richer dependency structure.
+one pass. So for a fixed layer budget, MAF expresses richer dependency structure.
 The cost appears immediately at sampling time.
 
 ### Sampling cost
 
 The forward pass (training) is fully parallel for both. The **inverse** pass (sampling)
-is not: AutoReg must evaluate its masked MLP once per parameter dimension per block,
-because $\theta_j$ cannot be computed until $\theta_{1..j-1}$ exist. Coupling inverts in
+is not: MAF must evaluate its masked MLP once per parameter dimension per block,
+because $\theta_j$ cannot be computed until $\theta_{1..j-1}$ exist. RealNVP inverts in
 a single vectorised sweep regardless of dimensionality.
 
 ```{r inverse-cost}
 inv_cost <- function(d, n = 2000, n_layers = 4, reps = 3) {
   cp <- probotMakeFlow(d, 9, n_layers, 64, device = "cpu")()
-  ar <- probotMakeFlow(d, 9, n_layers, 64, device = "cpu", style = "autoreg")()
+  ar <- probotMakeFlow(d, 9, n_layers, 64, device = "cpu", style = "maf")()
   z <- torch_randn(c(n, d)); cc <- torch_randn(c(n, 9))
   tc <- min(vapply(seq_len(reps),
                    function(i) system.time(with_no_grad(cp$inverse(z, cc)))[["elapsed"]], numeric(1)))
   ta <- min(vapply(seq_len(reps),
                    function(i) system.time(with_no_grad(ar$inverse(z, cc)))[["elapsed"]], numeric(1)))
-  data.frame(dim_theta = d, couple_sec = round(tc, 4),
-             autoreg_sec = round(ta, 4), ratio = round(ta / tc, 1))
+  data.frame(dim_theta = d, realnvp_sec = round(tc, 4),
+             maf_sec = round(ta, 4), ratio = round(ta / tc, 1))
 }
 
 ic <- do.call(rbind, lapply(c(2, 4, 8, 16, 32), inv_cost))
 ic
 ```
 
-Coupling's inverse time is flat in `dim_theta` (overhead-bound at these sizes);
-AutoReg's grows roughly linearly, because the work is `n_blocks * dim_theta` masked
+RealNVP's inverse time is flat in `dim_theta` (overhead-bound at these sizes);
+MAF's grows roughly linearly, because the work is `n_blocks * dim_theta` masked
 network evaluations. The absolute ratios are CPU/overhead-dependent and will vary by
 machine and batch size — the *shape of the scaling* is the durable point.
 
@@ -199,9 +200,9 @@ chk <- function(mdl, label) {
 
 rt <- do.call(rbind, lapply(c(2, 4, 8, 12), function(nl) {
   rbind(
-    chk(probotMakeFlow(4, 9, n_layers = nl, hidden_dim = 64, device = "cpu")(), "couple"),
+    chk(probotMakeFlow(4, 9, n_layers = nl, hidden_dim = 64, device = "cpu")(), "realnvp"),
     chk(probotMakeFlow(4, 9, n_layers = nl, hidden_dim = 64, device = "cpu",
-                       style = "autoreg")(), "autoreg")
+                       style = "maf")(), "maf")
   ) |> transform(n_layers = nl)
 }))
 rt
@@ -209,7 +210,7 @@ rt
 
 Errors sit at the 1e-7 to 1e-6 level throughout — the expected noise floor for
 float32 arithmetic, rising gently as more transformation steps accumulate. The floor is
-backend-dependent: the same coupling round-trip on MPS measured roughly two orders of
+backend-dependent: the same RealNVP round-trip on MPS measured roughly two orders of
 magnitude higher than on CPU. Use a round-trip check as a regression tripwire against
 your *own* baseline for a given backend rather than against a fixed universal number.
 
@@ -219,12 +220,12 @@ A genuine gotcha. `probotMakeFlow()` defaults to `hidden_dim = 32` and forwards 
 whichever style you choose, but the underlying modules have different defaults:
 
 ```{r defaults}
-formals(probotFlowCouple)[c("n_layers", "hidden_dim")]
-formals(probotFlowAutoReg)[c("n_blocks", "n_layers_per_block", "hidden_dim")]
+formals(probotFlowRealNVP)[c("n_layers", "hidden_dim")]
+formals(probotFlowMAF)[c("n_blocks", "n_layers_per_block", "hidden_dim")]
 ```
 
-When `probotMakeFlow(style = "autoreg")` is called, `n_layers` is mapped onto
-`n_blocks` and `n_layers_per_block` is fixed at 2. Calling `probotFlowAutoReg()`
+When `probotMakeFlow(style = "maf")` is called, `n_layers` is mapped onto
+`n_blocks` and `n_layers_per_block` is fixed at 2. Calling `probotFlowMAF()`
 directly instead gives you `n_blocks = 5` and `hidden_dim = 500` — a substantially
 larger model than the facade's defaults.
 
@@ -232,10 +233,10 @@ larger model than the facade's defaults.
 n_par <- function(m) sum(vapply(m$parameters, function(p) prod(dim(p)), numeric(1)))
 
 data.frame(
-  route = c("probotMakeFlow(style = \"autoreg\")", "probotFlowAutoReg() direct"),
+  route = c("probotMakeFlow(style = \"maf\")", "probotFlowMAF() direct"),
   parameters = c(
-    n_par(probotMakeFlow(4, 9, device = "cpu", style = "autoreg")()),
-    n_par(probotFlowAutoReg(dim_theta = 4, dim_x = 9, device = "cpu"))
+    n_par(probotMakeFlow(4, 9, device = "cpu", style = "maf")()),
+    n_par(probotFlowMAF(dim_theta = 4, dim_x = 9, device = "cpu"))
   )
 )
 ```
@@ -293,9 +294,9 @@ train_style <- function(style, epochs = 200) {
 }
 
 torch_manual_seed(2517)
-fit_cp <- train_style("couple")
+fit_cp <- train_style("realnvp")
 torch_manual_seed(2517)
-fit_ar <- train_style("autoreg")
+fit_ar <- train_style("maf")
 
 fit_cp$secs; tail(fit_cp$history, 1)
 fit_ar$secs; tail(fit_ar$history, 1)
@@ -308,7 +309,7 @@ plot(seq_along(fit_cp$history), fit_cp$history, type = "l", col = "steelblue",
      lwd = 2, ylim = range(c(fit_cp$history, fit_ar$history)),
      xlab = "Epoch", ylab = "Mean NLL", main = "Training loss")
 lines(seq_along(fit_ar$history), fit_ar$history, col = "darkorange", lwd = 2)
-legend("bottomleft", legend = c("coupling", "autoreg"),
+legend("bottomleft", legend = c("RealNVP", "MAF"),
        col = c("steelblue", "darkorange"), lwd = 2, bty = "n")
 ```
 
@@ -328,17 +329,17 @@ for (j in 1:2) {
   lines(density(s_ar[, j]), col = 'darkorange', add = TRUE)
   abline(v = theta_train[1, j], col = "red", lwd = 2, lty = 2)
 }
-legend("topright", legend = c("coupling", "autoreg", "truth"),
+legend("topright", legend = c("RealNVP", "MAF", "truth"),
        lty = c(1, 1, 2), col = c('steelblue', 'darkorange', "red"), bty = "n")
 ```
 
-Both have found a reasonable posterior centred around the 'truth' but the autoreg is arguably better.
+Both have found a reasonable posterior centred around the 'truth' but the MAF is arguably better.
 
 **A caution on reading these plots.** Do not treat a narrower posterior as better.
 Narrower means more confident; whether that confidence is *earned* is a calibration
 question, answered by PIT and TARP (see *Going with the Flow* and the CRPS diagnostic
 vignette), not by width. In short-budget runs of the comparison above we observed
-AutoReg reaching a lower training NLL while producing visibly tighter posteriors — but
+MAF reaching a lower training NLL while producing visibly tighter posteriors — but
 at short budgets both styles under-covered held-out truth substantially, so neither
 result should be over-interpreted. Judge architectures on calibration diagnostics over
 a held-out sample, at a budget where the loss has genuinely plateaued, and compare
@@ -354,7 +355,7 @@ rebuild the right skeleton automatically.
 ```{r save-load}
 f <- tempfile(fileext = ".pt")
 mdl <- probotMakeFlow(dim_theta = 4, dim_x = 9, n_layers = 3, hidden_dim = 32,
-                      device = "cpu", style = "autoreg")()
+                      device = "cpu", style = "maf")()
 
 probotSave(model = mdl, filename = f, model_type = "flow",
            dim_theta = 4, dim_x = 9, n_layers = 3, hidden_dim = 32)
@@ -365,35 +366,35 @@ unlink(f)
 ```
 
 If you are opening a checkpoint written before `flow_style` was recorded, `probotLoad()`
-falls back to `"couple"` — which will silently build the wrong skeleton if the weights
-are actually autoregressive. Pass `flow_style = "autoreg"` explicitly for those legacy
+falls back to `"realnvp"` — which will silently build the wrong skeleton if the weights
+are actually autoregressive. Pass `flow_style = "maf"` explicitly for those legacy
 files, and confirm the reloaded class matches what you trained.
 
 ---
 
 ## When to use which
 
-**Start with `"couple"`.** It is the package default for defensible reasons: one
+**Start with `"realnvp"`.** It is the package default for defensible reasons: one
 vectorised inverse pass regardless of `dim_theta`, cheaper forward and inverse, fewer
 parameters, and a flat, predictable sampling runtime. For low-dimensional posteriors
 with modest correlation — and for any workflow where you sample in large batches or
 interactively — it is usually sufficient.
 
-**Reach for `"autoreg"` when:**
+**Reach for `"maf"` when:**
 
-- Your parameters have **strong, asymmetric dependencies** where $\theta_j$ genuinely depends on many of $\theta_{1..j-1}$, and coupling's fixed half-split struggles to express that in the layers you can afford.
-- You have **high `dim_theta`** and want richer per-dimension conditioning without stacking many coupling layers.
-- The posterior shape is systematically wrong with coupling — banana structures that shear in one direction only, or marginal widths that refuse to tighten while calibration stays healthy.
+- Your parameters have **strong, asymmetric dependencies** where $\theta_j$ genuinely depends on many of $\theta_{1..j-1}$, and RealNVP's fixed half-split struggles to express that in the layers you can afford.
+- You have **high `dim_theta`** and want richer per-dimension conditioning without stacking many RealNVP layers.
+- The posterior shape is systematically wrong with RealNVP — banana structures that shear in one direction only, or marginal widths that refuse to tighten while calibration stays healthy.
 - You can pay the sampling cost: inverse is ~`n_blocks * dim_theta` masked evaluations, so batch your `probotSamplePostNF()` calls rather than looping over observations in R.
 
-**Stay on `"couple"` when:**
+**Stay on `"realnvp"` when:**
 
-- `dim_theta` is small (roughly single-digit) — the coupling split is not a bottleneck at d = 2 or 3, and AutoReg buys you little.
+- `dim_theta` is small (roughly single-digit) — the RealNVP split is not a bottleneck at d = 2 or 3, and MAF buys you little.
 - You are sampling many observations interactively, or the posterior draws are consumed in a loop you cannot batch.
 - You want the shortest path to a stable, reproducible result with fewer moving parts.
 
-The heuristic: **coupling spends expressiveness at training time to buy speed at
-sampling time; AutoReg buys expressiveness at the price of a sequential inverse.** If
+The heuristic: **RealNVP spends expressiveness at training time to buy speed at
+sampling time; MAF buys expressiveness at the price of a sequential inverse.** If
 you are unsure, train both on the same explicit hyperparameters, compare PIT/TARP
 calibration on held-out data, and let the diagnostics decide.
 
@@ -401,9 +402,9 @@ calibration on held-out data, and let the diagnostics decide.
 
 ## Summary
 
-| | `style = "couple"` | `style = "autoreg"` |
+| | `style = "realnvp"` | `style = "maf"` |
 |---|---|---|
-| Module | `probotFlowCouple()` | `probotFlowAutoReg()` |
+| Module | `probotFlowRealNVP()` | `probotFlowMAF()` |
 | Per-layer conditioning | Other half of `theta` + `x` | Full prefix `theta_{1..j-1}` + `x` |
 | Mixing mechanism | Half-swap | `torch_flip` permutation between blocks |
 | Forward pass | Parallel | Parallel |

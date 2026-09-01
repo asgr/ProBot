@@ -29,11 +29,11 @@ rational-quadratic splines whose widths, heights, and derivatives are predicted
 from the other half and the conditioning features. The halves are swapped after
 each layer. Consequently both density evaluation and sampling are parallel over
 coordinates, while the nonlinear spline transform is more flexible than affine
-coupling.
+RealNVP.
 }
 \value{An instantiated \code{\link[torch]{nn_module}}.}
-\seealso{\code{\link{probotMakeFlow}}, \code{\link{probotFlowCouple}},
-\code{\link{probotFlowAutoReg}}, \code{\link{probotTrainFlow}}.}
+\seealso{\code{\link{probotMakeFlow}}, \code{\link{probotFlowRealNVP}},
+\code{\link{probotFlowMAF}}, \code{\link{probotTrainFlow}}.}
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
   flow <- probotFlowNSF(dim_theta = 2, dim_x = 3, device = "cpu")

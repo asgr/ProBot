@@ -1,17 +1,17 @@
-\name{probotFlowCouple}
-\alias{probotFlowCouple}
-\title{Construct a Coupling (Affine NVP) Normalizing Flow}
+\name{probotFlowRealNVP}
+\alias{probotFlowRealNVP}
+\title{Construct a Real Non-Volume Preserving (RealNVP) Normalizing Flow}
 \description{
 Construct an \code{\link[torch]{nn_module}} implementing a conditional
-normalizing flow built from a stack of affine coupling (NVP) layers.
-This is the \code{style = "couple"} architecture of
+normalizing flow built from a stack of affine RealNVP layers.
+This is the \code{style = "realnvp"} architecture of
 \code{\link{probotMakeFlow}}. Each layer uses a half of the parameter
 vector, combined with the context, to predict an affine transformation
 of the other half; the halves are swapped after each layer so that all
 parameters are mixed across the stack.
 }
 \usage{
-probotFlowCouple(
+probotFlowRealNVP(
   dim_theta,
   dim_x,
   n_layers = 4,
@@ -27,10 +27,10 @@ probotFlowCouple(
     \item{dim_x}{Dimensionality of the context/input features used to
     condition the flow.}
 
-    \item{n_layers}{Number of coupling layers to stack. Defaults to 4.}
+    \item{n_layers}{Number of RealNVP layers to stack. Defaults to 4.}
 
     \item{hidden_dim}{Number of units in each hidden layer of the internal
-    shift/scale network within each coupling layer. Defaults to 32.}
+    shift/scale network within each RealNVP layer. Defaults to 32.}
 
     \item{soft_clamp}{Upper bound on the magnitude of the log-scale. The
     network output is clamped via
@@ -55,7 +55,7 @@ The returned module exposes:
   \code{\link{probotSamplePostNF}}. Layers are applied in reverse order.
 }
 
-The building block is the private \code{.probotCouplingLayer()} nn_module:
+The building block is the private \code{.probotRealNVPLayer()} nn_module:
 it splits \eqn{\theta} into halves of widths \eqn{d_1} (the floor of
 \code{dim_theta}/2) and \eqn{d_2 = dim_theta - d_1}, predicts a shift and a
 log-scale for the second half from \code{(theta_1, x)} through a two-hidden
@@ -72,15 +72,15 @@ An instantiated \code{\link[torch]{nn_module}}.
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotMakeFlow}}, \code{\link{probotFlowAutoReg}},
+\code{\link{probotMakeFlow}}, \code{\link{probotFlowMAF}},
 \code{\link{probotLossNF}}, \code{\link{probotTrainFlow}},
 \code{\link{probotSamplePostNF}}
 }
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
-## Build a 4-layer coupling flow for 2 parameters conditioned on 3 features.
+## Build a 4-layer RealNVP flow for 2 parameters conditioned on 3 features.
 ## The call returns an instantiated module (no extra parentheses needed).
-flow <- probotFlowCouple(dim_theta = 2, dim_x = 3, device = "cpu")
+flow <- probotFlowRealNVP(dim_theta = 2, dim_x = 3, device = "cpu")
 
 theta <- torch::torch_randn(c(10, 2))
 x <- torch::torch_randn(c(10, 3))

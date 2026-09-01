@@ -271,29 +271,29 @@ test_that("probotSave/probotLoad round-trips flow_style for both architectures",
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
 
-  # autoreg: flow_style should be inferred from the model class and round-trip
+  # MAF: flow_style should be inferred from the model class and round-trip
   mdl_a <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 16,
-                          device = "cpu", style = "autoreg")()
+                          device = "cpu", style = "maf")()
   probotSave(mdl_a, filename = tmp, model_type = "flow",
              dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 16, soft_clamp = 3)
 
   cp <- torch_load(tmp, device = "cpu")
-  expect_equal(cp$metadata$flow_style, "autoreg")
+  expect_equal(cp$metadata$flow_style, "maf")
 
   res_a <- probotLoad(tmp, device = "cpu")
-  expect_true(inherits(res_a$model, "probotFlowAutoReg"))
+  expect_true(inherits(res_a$model, "probotFlowMAF"))
 
-  # couple: the default architecture
+  # RealNVP: the default architecture
   mdl_c <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8,
                           device = "cpu")()
   probotSave(mdl_c, filename = tmp, model_type = "flow",
              dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
 
   cp2 <- torch_load(tmp, device = "cpu")
-  expect_equal(cp2$metadata$flow_style, "couple")
+  expect_equal(cp2$metadata$flow_style, "realnvp")
 
   res_c <- probotLoad(tmp, device = "cpu")
-  expect_true(inherits(res_c$model, "probotFlowCouple"))
+  expect_true(inherits(res_c$model, "probotFlowRealNVP"))
 })
 
 test_that("probotSave/probotLoad round-trips NSF configuration", {
@@ -309,7 +309,7 @@ test_that("probotSave/probotLoad round-trips NSF configuration", {
   expect_true(inherits(res$model, "probotFlowNSF"))
 })
 
-test_that("probotLoad defaults to couple when flow_style metadata is absent", {
+test_that("probotLoad defaults to RealNVP when flow_style metadata is absent", {
   set.seed(42)
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
@@ -327,7 +327,7 @@ test_that("probotLoad defaults to couple when flow_style metadata is absent", {
   )
 
   res <- probotLoad(tmp, device = "cpu")
-  expect_true(inherits(res$model, "probotFlowCouple"))
+  expect_true(inherits(res$model, "probotFlowRealNVP"))
 })
 
 test_that("probotSave warns on missing metadata per model type", {

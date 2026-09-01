@@ -1,11 +1,11 @@
 # ============================================================================
 # probotFlows.R
-# Normalizing Flow extensions for ProBot (Conditional NVP / Coupling Flows)
+# Normalizing Flow extensions for ProBot (Conditional NVP / RealNVP Flows)
 # ============================================================================
 
-# --- 1. Coupling Layer Definition ---
+# --- 1. RealNVP Layer Definition ---
 
-.probotCouplingLayer <- nn_module(
+.probotRealNVPLayer <- nn_module(
     initialize = function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=3, device = NULL) {
       self$dim_theta <- dim_theta
       self$dim_x <- dim_x
@@ -15,11 +15,11 @@
       # loaded packages ("object 'soft_clamp' not found").
       self$soft_clamp <- soft_clamp
 
-      # Split parameter space in half for coupling
+      # Split parameter space in half for RealNVP
       self$d1 <- floor(dim_theta / 2)
       self$d2 <- dim_theta - self$d1
       if (self$d1 < 1 || self$d2 < 1) {
-        stop("'dim_theta' must be >= 2 for .probotCouplingLayer() (got ", dim_theta, ")", call. = FALSE)
+        stop("'dim_theta' must be >= 2 for .probotRealNVPLayer() (got ", dim_theta, ")", call. = FALSE)
       }
       # Input to the shift/scale network is (first_half_of_theta + context_x)
       input_dim <- self$d1 + dim_x
@@ -103,14 +103,14 @@
 
 # --- 2. Flow Network Definition ---
 
-probotFlowCouple <- nn_module(
-  "probotFlowCouple",
+probotFlowRealNVP <- nn_module(
+  "probotFlowRealNVP",
     initialize = function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 3, device = NULL) {
       self$n_layers <- n_layers
 
-      # Register each coupling layer directly on self so torch tracks parameters & device placement
+      # Register each RealNVP layer directly on self so torch tracks parameters & device placement
       for (i in seq_len(n_layers)) {
-        self[[paste0("coupling_layer_", i)]] <- .probotCouplingLayer(dim_theta, dim_x,
+        self[[paste0("RealNVP_layer_", i)]] <- .probotRealNVPLayer(dim_theta, dim_x,
                                                   hidden_dim, soft_clamp=soft_clamp, device=device)
       }
 
@@ -127,7 +127,7 @@ probotFlowCouple <- nn_module(
       log_det_jac <- torch_zeros(theta$size(1), device = theta$device)$unsqueeze(1)
 
       for (i in seq_len(self$n_layers)) {
-        out <- self[[paste0("coupling_layer_", i)]]$forward(z, x)
+        out <- self[[paste0("RealNVP_layer_", i)]]$forward(z, x)
         z <- out$z
         log_det_jac <- log_det_jac + out$log_det_jac
       }
@@ -141,7 +141,7 @@ probotFlowCouple <- nn_module(
 
       # Iterate layers in reverse order
       for (i in rev(seq_len(self$n_layers))) {
-        theta <- self[[paste0("coupling_layer_", i)]]$inverse(theta, x)
+        theta <- self[[paste0("RealNVP_layer_", i)]]$inverse(theta, x)
       }
 
       return(theta)
@@ -168,8 +168,8 @@ probotFlowCouple <- nn_module(
     }
   )
 
-.probotFlowAutoRegBlock = nn_module(
-  ".probotFlowAutoRegBlock",
+.probotMAFBlock = nn_module(
+  ".probotMAFBlock",
   initialize = function(dim_theta, dim_x, n_layers = 2, hidden_dim = 500,
                         soft_clamp = 3, device = NULL) {
     self$dim_theta <- dim_theta
@@ -489,26 +489,26 @@ probotFlowNSF <- nn_module(
 
 probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
                            n_blocks = 5, n_layers_per_block = 2,
-                           soft_clamp = 3, device = NULL, style = "couple",
+                           soft_clamp = 3, device = NULL, style = "realnvp",
                            n_bins = 8, tail_bound = 3, ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
   # Disambiguates the available flow architectures:
-  #   style = "couple"    -> stacked affine NVP coupling layers (default)
-  #   style = "autoreg"   -> masked autoregressive blocks + permutation layers
-  #   style = "nsf"       -> stacked rational-quadratic spline coupling layers
-  match.arg(style, c("couple", "autoreg", "nsf"))
+  #   style = "realnvp" -> stacked affine RealNVP layers (default)
+  #   style = "maf"     -> masked autoregressive blocks + permutation layers
+  #   style = "nsf"     -> stacked rational-quadratic spline coupling layers
+  match.arg(style, c("realnvp", "maf", "nsf"))
   function() {
     # Calling a named nn_module with its constructor args already returns an
     # instantiated module, so no trailing `()` is added here.
     switch(style,
-      couple = probotFlowCouple(
+      realnvp = probotFlowRealNVP(
         dim_theta = dim_theta, dim_x = dim_x, n_layers = n_layers,
         hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
       ),
       # hidden_dim is passed through untouched (no clamping) so that a
       # save -> load round trip reconstructs the exact architecture.
-      autoreg = probotFlowAutoReg(
+      maf = probotFlowMAF(
         dim_theta = dim_theta, dim_x = dim_x, n_blocks = n_blocks,
         n_layers_per_block = 2, hidden_dim = hidden_dim,
         soft_clamp = soft_clamp, device = device
@@ -522,8 +522,8 @@ probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
   }
 }
 
-probotFlowAutoReg <- nn_module(
-  "probotFlowAutoReg",
+probotFlowMAF <- nn_module(
+  "probotFlowMAF",
   initialize = function(dim_theta, dim_x, n_blocks = 5, n_layers_per_block = 2, hidden_dim = 500, soft_clamp = 3, device = NULL) {
     self$dim_theta <- dim_theta
     self$dim_x <- dim_x
@@ -536,7 +536,7 @@ probotFlowAutoReg <- nn_module(
     for (i in 1:n_blocks) {
       # 1. Add the core Masked Autoregressive Flow block
       self$blocks$append(
-        .probotFlowAutoRegBlock(
+        .probotMAFBlock(
           dim_theta = dim_theta,
           dim_x = dim_x,
           n_layers = n_layers_per_block,

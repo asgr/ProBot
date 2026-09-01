@@ -39,15 +39,15 @@ probotSave <- function(
   # model's class when not given explicitly.
   if (model_type == "flow") {
     if (is.null(flow_style)) {
-      flow_style <- if (any(grepl("AutoReg", class(model)))) {
-        "autoreg"
+      flow_style <- if (any(grepl("MAF", class(model)))) {
+        "maf"
       } else if (any(grepl("NSF", class(model)))) {
         "nsf"
       } else {
-        "couple"
+        "realnvp"
       }
     } else {
-      flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
+      flow_style <- match.arg(tolower(flow_style), c("realnvp", "maf", "nsf"))
     }
   } else {
     flow_style <- NULL
@@ -175,7 +175,7 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
   # saved in metadata. It is the escape hatch for loading older flow
   # checkpoints saved before flow_style was recorded in the metadata block.
   if (!is.null(flow_style)) {
-    flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
+    flow_style <- match.arg(tolower(flow_style), c("realnvp", "maf", "nsf"))
   }
 
   required <- .probotRequired[[model_type]]
@@ -234,9 +234,9 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
       n_bins = if (!is.null(meta$n_bins)) meta$n_bins else 8,
       tail_bound = if (!is.null(meta$tail_bound)) meta$tail_bound else 3,
       soft_clamp  = if (!is.null(meta$soft_clamp)) meta$soft_clamp else 3,
-      # Priority: explicit override > saved metadata > "couple" (legacy default).
+      # Priority: explicit override > saved metadata > "realnvp" (legacy default).
       style       = if (!is.null(flow_style)) flow_style else
-                    if (!is.null(meta$flow_style)) meta$flow_style else "couple",
+                    if (!is.null(meta$flow_style)) meta$flow_style else "realnvp",
       device      = device
     )()
   )
