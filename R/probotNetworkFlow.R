@@ -384,6 +384,9 @@ probotFlowCouple <- nn_module(
     if (!is.numeric(tail_bound) || length(tail_bound) != 1 || tail_bound <= 0) {
       stop("'tail_bound' must be a positive number", call. = FALSE)
     }
+    if (2 * tail_bound <= n_bins * 1e-3) {
+      stop("'tail_bound' is too small for the requested number of bins", call. = FALSE)
+    }
     self$n_bins <- as.integer(n_bins)
     self$tail_bound <- tail_bound
     self$min_bin_width <- 1e-3
@@ -485,9 +488,10 @@ probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
                            device = NULL, style = "couple", ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
-  # Disambiguates the two flow architectures:
+  # Disambiguates the available flow architectures:
   #   style = "couple"    -> stacked affine NVP coupling layers (default)
   #   style = "autoreg"   -> masked autoregressive blocks + permutation layers
+  #   style = "nsf"       -> stacked rational-quadratic spline coupling layers
   match.arg(style, c("couple", "autoreg", "nsf"))
   function() {
     # Calling a named nn_module with its constructor args already returns an

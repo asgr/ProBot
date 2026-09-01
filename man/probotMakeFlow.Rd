@@ -6,14 +6,15 @@ Construct an \code{\link[torch]{nn_module}} implementing a normalizing flow
 for learning a conditional probability distribution. The network maps
 parameters to a latent space (forward) and vice versa (inverse). Two
 architectures are available: a stack of affine coupling layers
-(\code{style = "couple", the default}) or masked autoregressive blocks with
-permutation layers (\code{style = "autoreg"}). See \code{details} for a
+(\code{style = "couple", the default}), masked autoregressive blocks with
+permutation layers (\code{style = "autoreg"}), or rational-quadratic spline
+coupling layers (\code{style = "nsf"}). See \code{details} for a
 comparison and guidance on choosing between them.
 }
 \usage{
 probotMakeFlow(dim_theta, dim_x,
   n_layers = 4, hidden_dim = 32, n_blocks = 5, n_layers_per_block = 2
-  soft_clamp = 3, device = NULL, style = "couple"
+  soft_clamp = 3, n_bins = 8, tail_bound = 3, device = NULL, style = "couple"
 )
 }
 \arguments{
@@ -39,14 +40,20 @@ probotMakeFlow(dim_theta, dim_x,
     \item{soft_clamp}{Upper bound on the magnitude of the log-scale, applied
     via a soft \eqn{\tanh} clamp so the scale stays bounded. Larger values
     allow wider scales; values between 1 and 5 are typical. Defaults to 3.}
+    \item{n_bins}{Number of rational-quadratic spline bins when
+    \code{style = "nsf"}. Defaults to 8.}
+    \item{tail_bound}{Spline interval bound when \code{style = "nsf"}; the
+    transform is the identity outside \code{[-tail_bound, tail_bound]}.
+    Defaults to 3.}
 
     \item{device}{Character specifying the computing device: \code{"cpu"},
     \code{"cuda"}, or \code{"mps"}. If \code{NULL} (default), auto-detects
     MPS, falling back to CPU.}
 
     \item{style}{Which flow architecture to build: \code{"couple"} (stacked
-    affine NVP coupling layers, the default) or \code{"autoreg"} (masked
-    autoregressive blocks with alternating permutation layers). Determines
+    affine NVP coupling layers, the default), \code{"autoreg"} (masked
+    autoregressive blocks with alternating permutation layers), or
+    \code{"nsf"} (rational-quadratic spline coupling layers). Determines
     which module is returned: \code{\link{probotFlowCouple}} or
     \code{\link{probotFlowAutoReg}}.}
 }
@@ -80,6 +87,13 @@ per-layer mixing than coupling. The forward pass evaluates the masked MLP
 once per block, so training is fast; the inverse (sampling) pass is
 \emph{sequential}: coordinate \eqn{j} must be reconstructed before coordinate
 \eqn{j + 1}, costing \code{dim_theta} network evaluations per block.
+
+\strong{Neural spline flow (NSF).} The flow replaces each affine coupling
+transformation with a monotonic rational-quadratic spline. The spline
+parameters are conditioned on the complementary half of the parameter vector
+and \eqn{x}, so its forward and inverse passes remain parallel while modeling
+nonlinear marginal transformations. It is the identity outside
+\code{[-tail_bound, tail_bound]}.
 
 \strong{Practical implications.}
 \itemize{
@@ -124,6 +138,7 @@ Aaron Robotham
 \seealso{
 \code{\link{probotFlowCouple}},
 \code{\link{probotFlowAutoReg}},
+\code{\link{probotFlowNSF}},
 \code{\link{probotLossNF}},
 \code{\link{probotTrainFlow}},
 \code{\link{probotSamplePostNF}}
@@ -135,6 +150,9 @@ flow <- probotMakeFlow(dim_theta = 2, dim_x = 3, device = "cpu")()
 
 ## Or an autoregressive flow
 flow_ar <- probotMakeFlow(dim_theta = 2, dim_x = 3, style = "autoreg", device = "cpu")()
+
+## Or a rational-quadratic neural spline flow
+flow_nsf <- probotMakeFlow(dim_theta = 2, dim_x = 3, style = "nsf", device = "cpu")()
 
 ## Forward and inverse passes require torch tensors
 theta <- torch::torch_randn(c(10, 2))
