@@ -4,7 +4,7 @@
 \description{
 Construct an \code{\link[torch]{nn_module}} implementing a normalizing flow
 for learning a conditional probability distribution. The network maps
-parameters to a latent space (forward) and vice versa (inverse). Two
+parameters to a latent space (forward) and vice versa (inverse). Three
 architectures are available: a stack of affine coupling layers
 (\code{style = "couple", the default}), masked autoregressive blocks with
 permutation layers (\code{style = "autoreg"}), or rational-quadratic spline
@@ -13,7 +13,7 @@ comparison and guidance on choosing between them.
 }
 \usage{
 probotMakeFlow(dim_theta, dim_x,
-  n_layers = 4, hidden_dim = 32, n_blocks = 5, n_layers_per_block = 2
+  n_layers = 4, hidden_dim = 32, n_blocks = 5, n_layers_per_block = 2,
   soft_clamp = 3, n_bins = 8, tail_bound = 3, device = NULL, style = "couple"
 )
 }
@@ -54,8 +54,8 @@ probotMakeFlow(dim_theta, dim_x,
     affine NVP coupling layers, the default), \code{"autoreg"} (masked
     autoregressive blocks with alternating permutation layers), or
     \code{"nsf"} (rational-quadratic spline coupling layers). Determines
-    which module is returned: \code{\link{probotFlowCouple}} or
-    \code{\link{probotFlowAutoReg}}.}
+    which module is returned: \code{\link{probotFlowCouple}},
+    \code{\link{probotFlowAutoReg}}, or \code{\link{probotFlowNSF}}.}
 }
 \details{
 \code{probotMakeFlow()} is a facade: it returns a zero-argument constructor
@@ -63,7 +63,7 @@ that instantiates one of the two architectures. Call the result with \code{()}
 to obtain the \code{\link[torch]{nn_module}}. This is the entry point used by
 \code{\link{probotLoad}} to reconstruct a saved flow from its metadata.
 
-\subsection{Coupling vs. autoregressive architecture}{
+\subsection{Flow architectures}{
 
 Both architectures express the same object — an exact conditional density
 \eqn{p(\theta \mid x)} over the parameters — but they build it in different

@@ -336,6 +336,8 @@ probotFlowCouple <- nn_module(
   heights_bin <- select_bin(heights)
   left_bin <- select_bin(left_edges)
   bottom_bin <- select_bin(bottom_edges)
+  # The K bins use K+1 knot derivatives: each narrow selects one endpoint
+  # derivative pair for every bin.
   derivatives_left <- select_bin(derivatives$narrow(3, 1, n_bins))
   derivatives_right <- select_bin(derivatives$narrow(3, 2, n_bins))
   delta <- heights_bin / widths_bin

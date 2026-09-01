@@ -34,3 +34,11 @@ coupling.
 \value{An instantiated \code{\link[torch]{nn_module}}.}
 \seealso{\code{\link{probotMakeFlow}}, \code{\link{probotFlowCouple}},
 \code{\link{probotFlowAutoReg}}, \code{\link{probotTrainFlow}}.}
+\examples{
+if (requireNamespace("torch", quietly = TRUE)) {
+  flow <- probotFlowNSF(dim_theta = 2, dim_x = 3, device = "cpu")
+  out <- flow$forward(torch::torch_randn(c(10, 2)),
+                      torch::torch_randn(c(10, 3)))
+  names(out)
+}
+}
