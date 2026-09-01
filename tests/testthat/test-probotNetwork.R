@@ -97,6 +97,33 @@ test_that("probotMakeFlow forward then inverse recovers input", {
   )
 })
 
+test_that("Neural Spline Flow forward and inverse are consistent", {
+  set.seed(123)
+  mdl <- probotMakeFlow(4, 2, n_layers = 3, hidden_dim = 16, n_bins = 8,
+                        style = "nsf", device = "cpu")()
+  theta <- torch_randn(3, 4)
+  x <- torch_randn(3, 2)
+
+  fwd <- mdl$forward(theta, x)
+  rec <- mdl$inverse(fwd$z, x)
+
+  expect_true(inherits(mdl, "probotFlowNSF"))
+  expect_equal(fwd$z$shape, c(3L, 4L))
+  expect_equal(fwd$log_det_jac$shape, c(3L, 1L))
+  expect_equal(as.numeric(rec), as.numeric(theta), tolerance = 1e-4)
+})
+
+test_that("Neural Spline Flow has identity tails", {
+  mdl <- probotMakeFlow(2, 1, n_layers = 1, hidden_dim = 8, style = "nsf",
+                        device = "cpu")()
+  theta <- torch_tensor(matrix(c(10, -10), nrow = 1))
+  x <- torch_zeros(1, 1)
+  out <- mdl$forward(theta, x)
+
+  expect_equal(as.numeric(out$z), as.numeric(c(-10, 10)), tolerance = 1e-6)
+  expect_equal(as.numeric(out$log_det_jac), 0, tolerance = 1e-6)
+})
+
 # ---- probotNetworkSuggest tests ----
 
 test_that("probotNetworkSuggest returns list for Point", {
@@ -260,6 +287,14 @@ test_that("probotNetworkSuggest autoreg output plugs into probotMakeFlow", {
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
   expect_true(inherits(mdl, "probotFlowAutoReg"))
   expect_equal(mdl$n_blocks, s$n_layers)
+})
+
+test_that("probotNetworkSuggest NSF output plugs into probotMakeFlow", {
+  s <- probotNetworkSuggest(5, 2, type = "Flow", flow_style = "nsf",
+                            verbose = FALSE)
+  mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
+  expect_true(inherits(mdl, "probotFlowNSF"))
+  expect_equal(s$n_params, .count_params(mdl))
 })
 
 test_that("probotNetworkSuggest errors on invalid type", {

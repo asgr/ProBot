@@ -23,6 +23,10 @@ probotSave(
   n_layers = NULL,
   hidden_dim = NULL,
   hidden_dims = NULL,
+  n_blocks = NULL,
+  n_layers_per_block = NULL,
+  n_bins = NULL,
+  tail_bound = NULL,
   activation_name = NULL,
   dropout = NULL,
   soft_clamp = NULL,
@@ -77,6 +81,12 @@ probotLoad(
 
     \item{hidden_dim}{Width of the shift/scale network inside each coupling layer.
     Used for Flow model reconstruction (defaults to 32 if not saved).}
+    \item{n_blocks}{Number of autoregressive blocks for \code{style = "autoreg"}.}
+    \item{n_layers_per_block}{Number of masked layers per autoregressive block.}
+    \item{n_bins}{Number of rational-quadratic spline bins for
+    \code{style = "nsf"} (defaults to 8 if not saved).}
+    \item{tail_bound}{Spline interval bound for \code{style = "nsf"} (defaults
+    to 3 if not saved).}
 
     \item{hidden_dims}{Numeric vector of hidden layer sizes. Used for MDN and
     Point reconstruction (defaults to \code{c(128, 256, 256)} if not saved).}
@@ -91,12 +101,14 @@ probotLoad(
     not saved).}
 
     \item{flow_style}{Which flow architecture the checkpoint holds:
-    \code{"couple"} (stacked coupling layers, the default) or \code{"autoreg"}
-    (masked autoregressive blocks with permutation layers). Only meaningful
+    \code{"couple"} (stacked coupling layers, the default), \code{"autoreg"}
+    (masked autoregressive blocks with permutation layers), or \code{"nsf"}
+    (rational-quadratic spline coupling layers). Only meaningful
     for \code{model_type = "flow"}. For \code{probotSave()} it is written into
     the metadata; if \code{NULL}, it is inferred from the model's class
-    (\code{probotFlowAutoReg} instances yield \code{"autoreg"}, everything
-    else \code{"couple"}). For \code{probotLoad()} it acts as an override that
+    (\code{probotFlowAutoReg} instances yield \code{"autoreg"},
+    \code{probotFlowNSF} instances yield \code{"nsf"}, and other flows yield
+    \code{"couple"}). For \code{probotLoad()} it acts as an override that
     takes precedence over the saved value; useful for loading older flow
     checkpoints saved before \code{flow_style} was recorded.}
 

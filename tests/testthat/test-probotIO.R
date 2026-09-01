@@ -296,6 +296,19 @@ test_that("probotSave/probotLoad round-trips flow_style for both architectures",
   expect_true(inherits(res_c$model, "probotFlowCouple"))
 })
 
+test_that("probotSave/probotLoad round-trips NSF configuration", {
+  tmp <- tempfile(fileext = ".pt")
+  on.exit(unlink(tmp), add = TRUE)
+  mdl <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8,
+                        n_bins = 6, tail_bound = 4, style = "nsf", device = "cpu")()
+  probotSave(mdl, filename = tmp, model_type = "flow", dim_theta = 4, dim_x = 3,
+             n_layers = 2, hidden_dim = 8, n_bins = 6, tail_bound = 4)
+
+  res <- probotLoad(tmp, device = "cpu")
+  expect_equal(res$metadata$flow_style, "nsf")
+  expect_true(inherits(res$model, "probotFlowNSF"))
+})
+
 test_that("probotLoad defaults to couple when flow_style metadata is absent", {
   set.seed(42)
   tmp <- tempfile(fileext = ".pt")
