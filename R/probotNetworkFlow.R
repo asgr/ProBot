@@ -351,7 +351,9 @@ probotFlowCouple <- nn_module(
       y_minus_bottom * (derivatives_left + derivatives_right - 2 * delta)
     c <- -delta * y_minus_bottom
     discriminant <- torch_clamp(b^2 - 4 * a * c, min = 0)
-    root <- (2 * c) / (-b - torch_sqrt(discriminant))
+    sqrt_discriminant <- torch_sqrt(discriminant)
+    denom <- -b - torch_sign(b) * sqrt_discriminant
+    root <- (2 * c) / denom
     result <- left_bin + root * widths_bin
     return(torch_where(inside, result, input))
   }
