@@ -149,7 +149,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
 ## Create a RealNVP flow (default) with 4 layers
 flow <- probotMakeFlow(dim_theta = 2, dim_x = 3, device = "cpu")()
 
-## Or a Masked Autoregressive Flows (MAF) flow
+## Or a Masked Autoregressive Flow (MAF)
 flow_ar <- probotMakeFlow(dim_theta = 2, dim_x = 3, style = "maf", device = "cpu")()
 
 ## Or a rational-quadratic neural spline flow

@@ -81,7 +81,7 @@ probotLoad(
 
     \item{hidden_dim}{Width of the shift/scale network inside each RealNVP layer.
     Used for Flow model reconstruction (defaults to 32 if not saved).}
-    \item{n_blocks}{Number of Masked Autoregressive Flows (MAF) blocks for \code{style = "maf"}.}
+    \item{n_blocks}{Number of MAF (masked autoregressive) blocks for \code{style = "maf"}.}
     \item{n_layers_per_block}{Number of masked layers per autoregressive block.}
     \item{n_bins}{Number of rational-quadratic spline bins for
     \code{style = "nsf"} (defaults to 8 if not saved).}

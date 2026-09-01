@@ -23,7 +23,7 @@ eval_global <- FALSE
 The *Back and Forth* vignette covers the classic **Mixture Density Network** (MDN)
 workflow. This vignette introduces the second approach: **Normalising Flows** (NFs),
 specifically a conditional Real Non-Volume Preserving (RealNVP) architecture
-built from affine RealNVP layers.
+built from stacked RealNVP (affine coupling) layers.
 
 ### What is a Normalising Flow?
 

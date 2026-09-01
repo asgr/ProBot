@@ -1,6 +1,6 @@
 \name{probotFlowMAF}
 \alias{probotFlowMAF}
-\title{Construct a Masked Autoregressive Flows (MAF) Normalizing Flow}
+\title{Construct a Masked Autoregressive Flow (MAF) Normalizing Flow}
 \description{
 Construct an \code{\link[torch]{nn_module}} implementing a conditional
 normalizing flow from the Masked Autoregressive Flows (MAF) family, built from blocks separated
