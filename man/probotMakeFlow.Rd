@@ -14,7 +14,7 @@ comparison and guidance on choosing between them.
 \usage{
 probotMakeFlow(dim_theta, dim_x,
   n_layers = 4, hidden_dim = 32, n_blocks = 5, n_layers_per_block = 2,
-  soft_clamp = 3, n_bins = 8, tail_bound = 3, device = NULL, style = "couple"
+  soft_clamp = 3, device = NULL, style = "couple", n_bins = 8, tail_bound = 3
 )
 }
 \arguments{
@@ -59,13 +59,13 @@ probotMakeFlow(dim_theta, dim_x,
 }
 \details{
 \code{probotMakeFlow()} is a facade: it returns a zero-argument constructor
-that instantiates one of the two architectures. Call the result with \code{()}
+that instantiates one of the three architectures. Call the result with \code{()}
 to obtain the \code{\link[torch]{nn_module}}. This is the entry point used by
 \code{\link{probotLoad}} to reconstruct a saved flow from its metadata.
 
 \subsection{Flow architectures}{
 
-Both architectures express the same object — an exact conditional density
+All three architectures express the same object — an exact conditional density
 \eqn{p(\theta \mid x)} over the parameters — but they build it in different
 ways, which leads to practical differences worth understanding.
 

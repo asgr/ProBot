@@ -352,7 +352,7 @@ probotFlowCouple <- nn_module(
     c <- -delta * y_minus_bottom
     discriminant <- torch_clamp(b^2 - 4 * a * c, min = 0)
     sqrt_discriminant <- torch_sqrt(discriminant)
-    denom <- -b - torch_sign(b) * sqrt_discriminant
+    denom <- -(torch_abs(b) + sqrt_discriminant)
     root <- (2 * c) / denom
     result <- left_bin + root * widths_bin
     return(torch_where(inside, result, input))
@@ -489,8 +489,8 @@ probotFlowNSF <- nn_module(
 
 probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
                            n_blocks = 5, n_layers_per_block = 2,
-                           soft_clamp = 3, n_bins = 8, tail_bound = 3,
-                           device = NULL, style = "couple", ...) {
+                           soft_clamp = 3, device = NULL, style = "couple",
+                           n_bins = 8, tail_bound = 3, ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
   # Disambiguates the available flow architectures:
