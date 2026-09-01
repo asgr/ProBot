@@ -141,15 +141,15 @@ flow_dataloader <- probotDataLoader(
 
 `probotMakeFlow` accepts three key hyperparameters:
 
-- `dim_theta` — dimensionality of the parameter space (2 for `u` and `v`).
-- `dim_x` — dimensionality of the conditioning context (9 polynomial values).
+- `input_dim` — dimensionality of the conditioning context (9 polynomial values).
+- `output_dim` — dimensionality of the parameter space (2 for `u` and `v`).
 - `n_layers` — number of RealNVP layers; more layers increase expressiveness.
 - `hidden_dim` — width of the shift/scale network inside each RealNVP layer.
 
 ```{r build-flow, eval = eval_global}
 flow_model <- probotMakeFlow(
-  dim_theta  = ncol(theta_train),
-  dim_x      = ncol(poly_train$output),
+  input_dim     = ncol(poly_train$output),
+  output_dim    = ncol(theta_train),
   n_layers   = 6,
   hidden_dim = 64
 )()

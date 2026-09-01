@@ -225,10 +225,10 @@ test_that("probotSave and Load work for Flow model", {
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
 
-  mdl <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
   probotSave(mdl, filename = tmp,
              model_type = "flow",
-             dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
+             input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
 
   res <- probotLoad(tmp, device = "cpu")
   expect_equal(res$metadata$model_type, "flow")
@@ -240,11 +240,11 @@ test_that("flow save-load round-trip preserves forward output", {
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
 
-  mdl <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
   mdl$eval()
   probotSave(mdl, filename = tmp,
              model_type = "flow",
-             dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
+             input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
 
   theta <- torch_randn(2, 4, device = "cpu")
   ctx   <- torch_randn(2, 3, device = "cpu")
@@ -272,10 +272,10 @@ test_that("probotSave/probotLoad round-trips flow_style for both architectures",
   on.exit(unlink(tmp), add = TRUE)
 
   # MAF: flow_style should be inferred from the model class and round-trip
-  mdl_a <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 16,
+  mdl_a <- probotMakeFlow(input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 16,
                           device = "cpu", style = "maf")()
   probotSave(mdl_a, filename = tmp, model_type = "flow",
-             dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 16, soft_clamp = 3)
+             input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 16, soft_clamp = 3)
 
   cp <- torch_load(tmp, device = "cpu")
   expect_equal(cp$metadata$flow_style, "maf")
@@ -284,10 +284,10 @@ test_that("probotSave/probotLoad round-trips flow_style for both architectures",
   expect_true(inherits(res_a$model, "probotFlowMAF"))
 
   # RealNVP: the default architecture
-  mdl_c <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8,
+  mdl_c <- probotMakeFlow(input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8,
                           device = "cpu")()
   probotSave(mdl_c, filename = tmp, model_type = "flow",
-             dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
+             input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8, soft_clamp = 3)
 
   cp2 <- torch_load(tmp, device = "cpu")
   expect_equal(cp2$metadata$flow_style, "realnvp")
@@ -299,9 +299,9 @@ test_that("probotSave/probotLoad round-trips flow_style for both architectures",
 test_that("probotSave/probotLoad round-trips NSF configuration", {
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
-  mdl <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8,
+  mdl <- probotMakeFlow(input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8,
                         n_bins = 6, tail_bound = 4, style = "nsf", device = "cpu")()
-  probotSave(mdl, filename = tmp, model_type = "flow", dim_theta = 4, dim_x = 3,
+  probotSave(mdl, filename = tmp, model_type = "flow", input_dim = 3, output_dim = 4,
              n_layers = 2, hidden_dim = 8, n_bins = 6, tail_bound = 4)
 
   res <- probotLoad(tmp, device = "cpu")
@@ -314,14 +314,14 @@ test_that("probotLoad defaults to RealNVP when flow_style metadata is absent", {
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
 
-  mdl <- probotMakeFlow(dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
   # Save a legacy-style checkpoint with no flow_style field.
   torch_save(
     list(
       model_state = mdl$state_dict(),
       optimizer_state = NULL,
       metadata = list(version = "1.0", model_type = "flow",
-                      dim_theta = 4, dim_x = 3, n_layers = 2, hidden_dim = 8)
+                      input_dim = 3, output_dim = 4, n_layers = 2, hidden_dim = 8)
     ),
     tmp
   )
@@ -335,7 +335,7 @@ test_that("probotSave warns on missing metadata per model type", {
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
 
-  mdl <- probotMakeFlow(dim_theta = 2, dim_x = 3, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(input_dim = 3, output_dim = 2, n_layers = 2, hidden_dim = 8, device = "cpu")()
 
   expect_warning(
     probotSave(mdl, filename = tmp, model_type = "flow"),
@@ -343,7 +343,7 @@ test_that("probotSave warns on missing metadata per model type", {
   )
 })
 
-test_that("probotLoad errors for flow with missing dim_theta", {
+test_that("probotLoad errors for flow with missing output_dim", {
   tmp <- tempfile(fileext = ".pt")
   on.exit(unlink(tmp), add = TRUE)
 
@@ -351,7 +351,7 @@ test_that("probotLoad errors for flow with missing dim_theta", {
     list(
       model_state = list(),
       optimizer_state = NULL,
-      metadata = list(version = "1.0", model_type = "flow", dim_x = 3)
+      metadata = list(version = "1.0", model_type = "flow", input_dim = 3)
     ),
     tmp
   )

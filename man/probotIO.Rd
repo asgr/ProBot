@@ -18,8 +18,6 @@ probotSave(
   mdn_components = NULL,
   input_dim = NULL,
   output_dim = NULL,
-  dim_theta = NULL,
-  dim_x = NULL,
   n_layers = NULL,
   hidden_dim = NULL,
   hidden_dims = NULL,
@@ -66,15 +64,11 @@ probotLoad(
     \item{mdn_components}{Number of MDN mixture components. Required for
     \code{model_type = "mdn"}.}
 
-    \item{input_dim}{Dimension of the input layer. Required for Flow, MDN and Point models.}
+    \item{input_dim}{Dimensionality of the input (conditioning) features.
+    Required for Flow, MDN and Point models.}
 
-    \item{output_dim}{Dimension of the output layer. Required for Flow, MDN and Point models.}
-
-    \item{dim_theta}{Dimensionality of the parameter space. Required for
-    \code{model_type = "flow"}.}
-
-    \item{dim_x}{Dimensionality of the conditioning context. Required for
-    \code{model_type = "flow"}.}
+    \item{output_dim}{Dimensionality of the output (parameter) space.
+    Required for Flow, MDN and Point models.}
 
     \item{n_layers}{Number of RealNVP layers. Used for Flow model
     reconstruction (defaults to 4 if not saved).}
@@ -140,7 +134,7 @@ metadata fields are required for auto-reconstruction:
 \describe{
   \item{\code{"mdn"}}{requires \code{mdn_components}, \code{input_dim}, \code{output_dim}}
   \item{\code{"point"}}{requires \code{input_dim}, \code{output_dim}}
-  \item{\code{"flow"}}{requires \code{dim_theta}, \code{dim_x}}
+  \item{\code{"flow"}}{requires \code{input_dim}, \code{output_dim}}
 }
 
 When required metadata is missing, \code{probotSave()} issues a warning that
@@ -210,8 +204,8 @@ probotSave(
   flow_model,
   filename = "my_flow.pt",
   model_type = "flow",
-  dim_theta = 4,
-  dim_x = 3,
+  input_dim = 3,
+  output_dim = 4,
   n_layers = 6,
   hidden_dim = 64
 )

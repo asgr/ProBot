@@ -2,7 +2,7 @@
 .probotRequired <- list(
   mdn   = c("mdn_components", "input_dim", "output_dim"),
   point = c("input_dim", "output_dim"),
-  flow  = c("dim_theta", "dim_x")
+  flow  = c("input_dim", "output_dim")
 )
 
 probotSave <- function(
@@ -13,8 +13,6 @@ probotSave <- function(
     mdn_components = NULL,
     input_dim = NULL,
     output_dim = NULL,
-    dim_theta = NULL,
-    dim_x = NULL,
     n_layers = NULL,
     hidden_dim = NULL,
     hidden_dims = NULL,
@@ -58,7 +56,7 @@ probotSave <- function(
   meta_values <- switch(model_type,
     mdn   = list(mdn_components, input_dim, output_dim),
     point = list(input_dim, output_dim),
-    flow  = list(dim_theta, dim_x)
+    flow  = list(input_dim, output_dim)
   )
 
   missing <- required[vapply(meta_values, is.null, logical(1))]
@@ -80,8 +78,6 @@ probotSave <- function(
       mdn_components  = mdn_components,
       input_dim       = input_dim,
       output_dim      = output_dim,
-      dim_theta       = dim_theta,
-      dim_x           = dim_x,
       n_layers        = n_layers,
       hidden_dim      = hidden_dim,
       hidden_dims     = hidden_dims,
@@ -175,7 +171,28 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
   # saved in metadata. It is the escape hatch for loading older flow
   # checkpoints saved before flow_style was recorded in the metadata block.
   if (!is.null(flow_style)) {
-    flow_style <- match.arg(tolower(flow_style), c("realnvp", "maf", "nsf"))
+    flow_style <- match.arg(tolower(flow_style), c("realnvp", "maf", "nsf",
+                                                   "couple", "autoreg"))
+    flow_style <- switch(flow_style,
+      couple   = "realnvp",
+      autoreg  = "maf",
+      flow_style
+    )
+  }
+
+  # For flow checkpoints saved before the dim_theta/dim_x -> input_dim/output_dim
+  # rename, normalise legacy metadata keys so reconstruction still works.
+  if (model_type == "flow") {
+    if (is.null(meta$input_dim)  && !is.null(meta$dim_x))     meta$input_dim  <- meta$dim_x
+    if (is.null(meta$output_dim) && !is.null(meta$dim_theta))  meta$output_dim <- meta$dim_theta
+    # Normalise legacy flow_style values saved before the rename.
+    if (!is.null(meta$flow_style)) {
+      meta$flow_style <- switch(meta$flow_style,
+        couple  = "realnvp",
+        autoreg = "maf",
+        meta$flow_style
+      )
+    }
   }
 
   required <- .probotRequired[[model_type]]
@@ -225,8 +242,8 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
       device      = device
     )(),
     flow = probotMakeFlow(
-      dim_theta   = meta$dim_theta,
-      dim_x       = meta$dim_x,
+      input_dim   = meta$input_dim,
+      output_dim  = meta$output_dim,
       n_layers    = if (!is.null(meta$n_layers)) meta$n_layers else 4,
       hidden_dim  = if (!is.null(meta$hidden_dim)) meta$hidden_dim else 32,
       n_blocks  = if (!is.null(meta$n_blocks)) meta$n_blocks else 5,

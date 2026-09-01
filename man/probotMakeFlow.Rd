@@ -13,16 +13,16 @@ coupling layers (\code{style = "nsf"}). See \code{details} for a
 comparison and guidance on choosing between them.
 }
 \usage{
-probotMakeFlow(dim_theta, dim_x,
+probotMakeFlow(input_dim, output_dim,
   n_layers = 4, hidden_dim = 32, n_blocks = 5, n_layers_per_block = 2,
   soft_clamp = 3, device = NULL, style = "realnvp", n_bins = 8, tail_bound = 3
 )
 }
 \arguments{
-    \item{dim_theta}{Total dimensionality of the parameter space.}
-
-    \item{dim_x}{Dimensionality of the context/input features used to
+    \item{input_dim}{Dimensionality of the context/input features used to
     condition the flow.}
+
+    \item{output_dim}{Total dimensionality of the parameter space.}
 
     \item{n_layers}{Number of RealNVP layers to stack. Defaults to 4.}
 
@@ -83,11 +83,11 @@ coordinates and cost \emph{O}(\code{n_layers}) network evaluations each.
 autoregressive blocks separated by permutation layers. Inside a block, every
 coordinate's affine transformation depends on all coordinates ordered before
 it (enforced by a weight mask), so the whole joint density is factorised as a
-product of \code{dim_theta} conditionals in a single block — far richer
+product of \code{output_dim} conditionals in a single block — far richer
 per-layer mixing than RealNVP. The forward pass evaluates the masked MLP
 once per block, so training is fast; the inverse (sampling) pass is
 \emph{sequential}: coordinate \eqn{j} must be reconstructed before coordinate
-\eqn{j + 1}, costing \code{dim_theta} network evaluations per block.
+\eqn{j + 1}, costing \code{output_dim} network evaluations per block.
 
 \strong{Neural spline flow (NSF).} The flow replaces each affine coupling
 transformation with a monotonic rational-quadratic spline. The spline
@@ -102,17 +102,17 @@ nonlinear marginal transformations. It is the identity outside
   training (negative-log-likelihood) loss and better posterior calibration
   than a RealNVP flow of the same depth, because each block captures more of
   the joint structure in one pass. Choose \code{style = "maf"} when
-  posterior fidelity matters and \code{dim_theta} is moderate.
+  posterior fidelity matters and \code{output_dim} is moderate.
   \item \emph{Sampling speed.} For posterior sampling the RealNVP style is
   usually much cheaper: its inverse pass is parallel, whereas the
-  autoregressive inverse cost grows with both \code{dim_theta} and
+  autoregressive inverse cost grows with both \code{output_dim} and
   \code{n_blocks}. If you draw a large number of posterior samples (e.g., for
   CRPS / PIT / TARP), the autoregressive inverse pass can dominate wall-clock
   time.
-  \item \emph{Small \code{dim_theta}.} A single parameter dimension is not
+  \item \emph{Small \code{output_dim}.} A single parameter dimension is not
   supported by either flow (a lone coordinate has nothing to couple or
-  autoreg over). At \code{dim_theta = 2} the two architectures are close
-  in expressive power; their differences matter more as \code{dim_theta}
+  autoreg over). At \code{output_dim = 2} the two architectures are close
+  in expressive power; their differences matter more as \code{output_dim}
   grows.
   \item \emph{Shared setup.} Both flows train the same way via
   \code{\link{probotTrainFlow}} and \code{\link{probotLossNF}}, rely on the
@@ -147,13 +147,13 @@ Aaron Robotham
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
 ## Create a RealNVP flow (default) with 4 layers
-flow <- probotMakeFlow(dim_theta = 2, dim_x = 3, device = "cpu")()
+flow <- probotMakeFlow(input_dim = 3, output_dim = 2, device = "cpu")()
 
 ## Or a Masked Autoregressive Flow (MAF)
-flow_ar <- probotMakeFlow(dim_theta = 2, dim_x = 3, style = "maf", device = "cpu")()
+flow_ar <- probotMakeFlow(input_dim = 3, output_dim = 2, style = "maf", device = "cpu")()
 
 ## Or a rational-quadratic neural spline flow
-flow_nsf <- probotMakeFlow(dim_theta = 2, dim_x = 3, style = "nsf", device = "cpu")()
+flow_nsf <- probotMakeFlow(input_dim = 3, output_dim = 2, style = "nsf", device = "cpu")()
 
 ## Forward and inverse passes require torch tensors
 theta <- torch::torch_randn(c(10, 2))

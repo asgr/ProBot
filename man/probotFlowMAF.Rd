@@ -12,8 +12,8 @@ distributions.
 }
 \usage{
 probotFlowMAF(
-  dim_theta,
-  dim_x,
+  input_dim,
+  output_dim,
   n_blocks = 5,
   n_layers_per_block = 2,
   hidden_dim = 500,
@@ -22,10 +22,10 @@ probotFlowMAF(
 )
 }
 \arguments{
-    \item{dim_theta}{Total dimensionality of the parameter space.}
-
-    \item{dim_x}{Dimensionality of the context/input features used to
+    \item{input_dim}{Dimensionality of the context/input features used to
     condition the flow.}
+
+    \item{output_dim}{Total dimensionality of the parameter space.}
 
     \item{n_blocks}{Number of masked autoregressive blocks to stack.
     Defaults to 5.}
@@ -66,8 +66,8 @@ The inverse pass reconstructs \eqn{\theta} coordinate by coordinate: because
 of the autoregressive mask, the transformation for coordinate \eqn{j} is
 known as soon as coordinates \eqn{1, \dots, j-1} are reconstructed, so
 sampling is exact. Unlike the RealNVP architecture, this reconstruction is
-\emph{sequential} in \code{dim_theta} and calls the masked MLP
-\code{dim_theta} times per block, which is the main reason autoregressive
+\emph{sequential} in \code{output_dim} and calls the masked MLP
+\code{output_dim} times per block, which is the main reason autoregressive
 sampling is slower than RealNVP sampling (see
 \code{\link{probotMakeFlow}} for a comparison).
 }
@@ -86,7 +86,7 @@ Aaron Robotham
 if (requireNamespace("torch", quietly = TRUE)) {
 ## Build an autoregressive flow for 3 parameters conditioned on 2 features.
 ## The call returns an instantiated module (no extra parentheses needed).
-flow <- probotFlowMAF(dim_theta = 3, dim_x = 2, device = "cpu")
+flow <- probotFlowMAF(input_dim = 2, output_dim = 3, device = "cpu")
 
 theta <- torch::torch_randn(c(10, 3))
 x <- torch::torch_randn(c(10, 2))

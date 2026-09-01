@@ -150,14 +150,14 @@ test_that("probotTrainPoint completes and returns model and history", {
 # --- Flow training ---
 test_that("probotSingleEpochFlow runs without error", {
   set.seed(42)
-  dim_theta <- 4; dim_x <- 2
+  output_dim <- 4; input_dim <- 2
   n <- 32
 
   # For flow: input=batch[[1]]=x (context), output=batch[[2]]=theta
-  x <- matrix(rnorm(n * dim_x), n, dim_x)
-  theta <- matrix(rnorm(n * dim_theta), n, dim_theta)
+  x <- matrix(rnorm(n * input_dim), n, input_dim)
+  theta <- matrix(rnorm(n * output_dim), n, output_dim)
 
-  mdl <- probotMakeFlow(dim_theta, dim_x, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(input_dim, output_dim, n_layers = 2, hidden_dim = 8, device = "cpu")()
   opt <- optim_adam(mdl$parameters, lr = 1e-3)
   dl <- probotDataLoader(x, theta, batch = 16, device = "cpu")
 
@@ -168,13 +168,13 @@ test_that("probotSingleEpochFlow runs without error", {
 
 test_that("probotTrainFlow completes and returns model and history", {
   set.seed(42)
-  dim_theta <- 4; dim_x <- 2
+  output_dim <- 4; input_dim <- 2
   n <- 32
 
-  x <- matrix(rnorm(n * dim_x), n, dim_x)
-  theta <- matrix(rnorm(n * dim_theta), n, dim_theta)
+  x <- matrix(rnorm(n * input_dim), n, input_dim)
+  theta <- matrix(rnorm(n * output_dim), n, output_dim)
 
-  mdl <- probotMakeFlow(dim_theta, dim_x, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(input_dim, output_dim, n_layers = 2, hidden_dim = 8, device = "cpu")()
   opt <- optim_adam(mdl$parameters, lr = 1e-3)
   dl <- probotDataLoader(x, theta, batch = 16, device = "cpu")
 

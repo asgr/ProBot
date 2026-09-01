@@ -12,8 +12,8 @@ parameters are mixed across the stack.
 }
 \usage{
 probotFlowRealNVP(
-  dim_theta,
-  dim_x,
+  input_dim,
+  output_dim,
   n_layers = 4,
   hidden_dim = 32,
   soft_clamp = 3,
@@ -21,11 +21,10 @@ probotFlowRealNVP(
 )
 }
 \arguments{
-    \item{dim_theta}{Total dimensionality of the parameter space. Must be
-    at least 2.}
+    \item{input_dim}{Dimensionality of the conditioning context features.}
 
-    \item{dim_x}{Dimensionality of the context/input features used to
-    condition the flow.}
+    \item{output_dim}{Total dimensionality of the parameter space. Must be
+    at least 2.}
 
     \item{n_layers}{Number of RealNVP layers to stack. Defaults to 4.}
 
@@ -57,7 +56,7 @@ The returned module exposes:
 
 The building block is the private \code{.probotRealNVPLayer()} nn_module:
 it splits \eqn{\theta} into halves of widths \eqn{d_1} (the floor of
-\code{dim_theta}/2) and \eqn{d_2 = dim_theta - d_1}, predicts a shift and a
+\code{output_dim}/2) and \eqn{d_2 = output_dim - d_1}, predicts a shift and a
 log-scale for the second half from \code{(theta_1, x)} through a two-hidden
 GeLU MLP, applies \eqn{z_2 = (\theta_2 - t)\exp(s)}, and swaps the two halves
 so the next layer transforms the complementary subset. Because each layer
@@ -80,7 +79,7 @@ Aaron Robotham
 if (requireNamespace("torch", quietly = TRUE)) {
 ## Build a 4-layer RealNVP flow for 2 parameters conditioned on 3 features.
 ## The call returns an instantiated module (no extra parentheses needed).
-flow <- probotFlowRealNVP(dim_theta = 2, dim_x = 3, device = "cpu")
+flow <- probotFlowRealNVP(input_dim = 3, output_dim = 2, device = "cpu")
 
 theta <- torch::torch_randn(c(10, 2))
 x <- torch::torch_randn(c(10, 3))

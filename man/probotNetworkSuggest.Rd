@@ -26,10 +26,10 @@ probotNetworkSuggest(
 }
 \arguments{
   \item{input_dim}{Integer. Number of input features (context / observed data
-    dimensions). For \code{type = "Flow"} this corresponds to \code{dim_x}.}
+    dimensions). For \code{type = "Flow"} this corresponds to \code{input_dim}.}
 
   \item{output_dim}{Integer. Number of output dimensions (parameters to
-    infer). For \code{type = "Flow"} this corresponds to \code{dim_theta}.}
+    infer). For \code{type = "Flow"} this corresponds to \code{output_dim}.}
 
   \item{n_train}{Optional integer: the number of training observations. When
     supplied, the heuristics are additionally scaled by
@@ -109,7 +109,7 @@ via \code{do.call}.
     \code{hidden_dims}, \code{dropout}, \code{n_params}.
   }
   \item{\code{type = "Flow"}}{
-    \code{dim_x}, \code{dim_theta}, \code{n_layers}, \code{hidden_dim},
+    \code{input_dim}, \code{output_dim}, \code{n_layers}, \code{hidden_dim},
     \code{style}, \code{n_params}.
   }
 }

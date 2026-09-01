@@ -75,7 +75,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   y <- matrix(rnorm(40), ncol = 2)
 
   loader <- probotDataLoader(x, y, batch = 5, shuffle = FALSE)
-  model <- probotMakeFlow(dim_theta = 2, dim_x = 3)()
+  model <- probotMakeFlow(input_dim = 3, output_dim = 2)()
   opt <- torch::optim_adam(model$parameters, lr = 0.01)
 
   metrics <- probotSingleEpochFlow(

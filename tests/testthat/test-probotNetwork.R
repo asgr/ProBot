@@ -146,9 +146,9 @@ test_that("probotNetworkSuggest returns list for MDN", {
 test_that("probotNetworkSuggest returns list for Flow", {
   s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("dim_x", "dim_theta", "n_layers", "hidden_dim", "style", "n_params"))
-  expect_equal(s$dim_x, 6L)
-  expect_equal(s$dim_theta, 4L)
+  expect_named(s, c("input_dim", "output_dim", "n_layers", "hidden_dim", "style", "n_params"))
+  expect_equal(s$input_dim, 6L)
+  expect_equal(s$output_dim, 4L)
   expect_equal(s$style, "realnvp")
 })
 
@@ -164,7 +164,7 @@ test_that("probotNetworkSuggest Flow defaults to RealNVP and is style-aware", {
 })
 
 test_that("probotNetworkSuggest MAF uses fewer blocks but wider conditioner", {
-  # MAF pays dim_theta sequential passes per block at sample time, so the
+  # MAF pays output_dim sequential passes per block at sample time, so the
   # heuristic keeps blocks low and shifts capacity into conditioner width.
   for (d in c(2, 4, 8, 16)) {
     cp <- probotNetworkSuggest(9, d, type = "Flow", verbose = FALSE)

@@ -50,7 +50,7 @@ Everything below concerns *how* $f$ is built.
 `.probotRealNVPLayer` splits the parameter vector into two halves and transforms one
 half conditioned on the other:
 
-1. Split $\theta = (\theta_1, \theta_2)$ at `d1 = floor(dim_theta / 2)`.
+1. Split $\theta = (\theta_1, \theta_2)$ at `d1 = floor(output_dim / 2)`.
 2. A small MLP takes $(\theta_1, x)$ and predicts shift $t$ and log-scale $s$ for $\theta_2$.
 3. Apply $z_2 = (\theta_2 - t)\exp(s)$; $\theta_1$ passes through untouched.
 4. Swap the halves, so the next layer transforms the complementary subset.
@@ -112,17 +112,17 @@ without touching any other part of your workflow.
 
 MAF's conditioner must produce shift/log-scale for *every* dimension, for every
 degree, from a fully masked dense layer. RealNVP's conditioner only produces outputs
-for half the dimensions, from a narrower input. The gap widens with `dim_theta`.
+for half the dimensions, from a narrower input. The gap widens with `output_dim`.
 
 ```{r param-counts}
 n_par <- function(m) sum(vapply(m$parameters, function(p) prod(dim(p)), numeric(1)))
 
 pc <- do.call(rbind, lapply(c(2, 4, 8, 16), function(d) {
-  cp <- probotMakeFlow(dim_theta = d, dim_x = 9, n_layers = 6,
+  cp <- probotMakeFlow(input_dim = 9, output_dim = d, n_layers = 6,
                        hidden_dim = 64, device = "cpu")()
-  ar <- probotMakeFlow(dim_theta = d, dim_x = 9, n_layers = 6,
+  ar <- probotMakeFlow(input_dim = 9, output_dim = d, n_layers = 6,
                        hidden_dim = 64, device = "cpu", style = "maf")()
-  data.frame(dim_theta = d, realnvp = n_par(cp), maf = n_par(ar),
+  data.frame(output_dim = d, realnvp = n_par(cp), maf = n_par(ar),
              ratio = round(n_par(ar) / n_par(cp), 2))
 }))
 pc
@@ -156,14 +156,14 @@ a single vectorised sweep regardless of dimensionality.
 
 ```{r inverse-cost}
 inv_cost <- function(d, n = 2000, n_layers = 4, reps = 3) {
-  cp <- probotMakeFlow(d, 9, n_layers, 64, device = "cpu")()
-  ar <- probotMakeFlow(d, 9, n_layers, 64, device = "cpu", style = "maf")()
+  cp <- probotMakeFlow(input_dim = 9, output_dim = d, n_layers = n_layers, hidden_dim = 64, device = "cpu")()
+  ar <- probotMakeFlow(input_dim = 9, output_dim = d, n_layers = n_layers, hidden_dim = 64, device = "cpu", style = "maf")()
   z <- torch_randn(c(n, d)); cc <- torch_randn(c(n, 9))
   tc <- min(vapply(seq_len(reps),
                    function(i) system.time(with_no_grad(cp$inverse(z, cc)))[["elapsed"]], numeric(1)))
   ta <- min(vapply(seq_len(reps),
                    function(i) system.time(with_no_grad(ar$inverse(z, cc)))[["elapsed"]], numeric(1)))
-  data.frame(dim_theta = d, realnvp_sec = round(tc, 4),
+  data.frame(output_dim = d, realnvp_sec = round(tc, 4),
              maf_sec = round(ta, 4), ratio = round(ta / tc, 1))
 }
 
@@ -171,8 +171,8 @@ ic <- do.call(rbind, lapply(c(2, 4, 8, 16, 32), inv_cost))
 ic
 ```
 
-RealNVP's inverse time is flat in `dim_theta` (overhead-bound at these sizes);
-MAF's grows roughly linearly, because the work is `n_blocks * dim_theta` masked
+RealNVP's inverse time is flat in `output_dim` (overhead-bound at these sizes);
+MAF's grows roughly linearly, because the work is `n_blocks * output_dim` masked
 network evaluations. The absolute ratios are CPU/overhead-dependent and will vary by
 machine and batch size — the *shape of the scaling* is the durable point.
 
@@ -200,8 +200,8 @@ chk <- function(mdl, label) {
 
 rt <- do.call(rbind, lapply(c(2, 4, 8, 12), function(nl) {
   rbind(
-    chk(probotMakeFlow(4, 9, n_layers = nl, hidden_dim = 64, device = "cpu")(), "realnvp"),
-    chk(probotMakeFlow(4, 9, n_layers = nl, hidden_dim = 64, device = "cpu",
+    chk(probotMakeFlow(input_dim = 9, output_dim = 4, n_layers = nl, hidden_dim = 64, device = "cpu")(), "realnvp"),
+    chk(probotMakeFlow(input_dim = 9, output_dim = 4, n_layers = nl, hidden_dim = 64, device = "cpu",
                        style = "maf")(), "maf")
   ) |> transform(n_layers = nl)
 }))
@@ -235,8 +235,8 @@ n_par <- function(m) sum(vapply(m$parameters, function(p) prod(dim(p)), numeric(
 data.frame(
   route = c("probotMakeFlow(style = \"maf\")", "probotFlowMAF() direct"),
   parameters = c(
-    n_par(probotMakeFlow(4, 9, device = "cpu", style = "maf")()),
-    n_par(probotFlowMAF(dim_theta = 4, dim_x = 9, device = "cpu"))
+    n_par(probotMakeFlow(input_dim = 9, output_dim = 4, device = "cpu", style = "maf")()),
+    n_par(probotFlowMAF(input_dim = 9, output_dim = 4, device = "cpu"))
   )
 )
 ```
@@ -283,7 +283,7 @@ for the reason noted above.
 ```{r train-both, eval = eval_train}
 train_style <- function(style, epochs = 200) {
   dl <- probotDataLoader(input = x_sc, output = t_sc, batch = 1024)
-  mdl <- probotMakeFlow(dim_theta = 2, dim_x = 9, n_layers = 6,
+  mdl <- probotMakeFlow(input_dim = 9, output_dim = 2, n_layers = 6,
                         hidden_dim = 64, style = style)()
   t0 <- Sys.time()
   res <- probotTrainFlow(model = mdl, dataloader = dl,
@@ -354,11 +354,11 @@ rebuild the right skeleton automatically.
 
 ```{r save-load}
 f <- tempfile(fileext = ".pt")
-mdl <- probotMakeFlow(dim_theta = 4, dim_x = 9, n_layers = 3, hidden_dim = 32,
+mdl <- probotMakeFlow(input_dim = 9, output_dim = 4, n_layers = 3, hidden_dim = 32,
                       device = "cpu", style = "maf")()
 
 probotSave(model = mdl, filename = f, model_type = "flow",
-           dim_theta = 4, dim_x = 9, n_layers = 3, hidden_dim = 32)
+           input_dim = 9, output_dim = 4, n_layers = 3, hidden_dim = 32)
 
 back <- probotLoad(f, device = "cpu")
 cat("reloaded class:", paste(class(back$model), collapse = ", "), "\n")
@@ -375,7 +375,7 @@ files, and confirm the reloaded class matches what you trained.
 ## When to use which
 
 **Start with `"realnvp"`.** It is the package default for defensible reasons: one
-vectorised inverse pass regardless of `dim_theta`, cheaper forward and inverse, fewer
+vectorised inverse pass regardless of `output_dim`, cheaper forward and inverse, fewer
 parameters, and a flat, predictable sampling runtime. For low-dimensional posteriors
 with modest correlation — and for any workflow where you sample in large batches or
 interactively — it is usually sufficient.
@@ -383,13 +383,13 @@ interactively — it is usually sufficient.
 **Reach for `"maf"` when:**
 
 - Your parameters have **strong, asymmetric dependencies** where $\theta_j$ genuinely depends on many of $\theta_{1..j-1}$, and RealNVP's fixed half-split struggles to express that in the layers you can afford.
-- You have **high `dim_theta`** and want richer per-dimension conditioning without stacking many RealNVP layers.
+- You have **high `output_dim`** and want richer per-dimension conditioning without stacking many RealNVP layers.
 - The posterior shape is systematically wrong with RealNVP — banana structures that shear in one direction only, or marginal widths that refuse to tighten while calibration stays healthy.
-- You can pay the sampling cost: inverse is ~`n_blocks * dim_theta` masked evaluations, so batch your `probotSamplePostNF()` calls rather than looping over observations in R.
+- You can pay the sampling cost: inverse is ~`n_blocks * output_dim` masked evaluations, so batch your `probotSamplePostNF()` calls rather than looping over observations in R.
 
 **Stay on `"realnvp"` when:**
 
-- `dim_theta` is small (roughly single-digit) — the RealNVP split is not a bottleneck at d = 2 or 3, and MAF buys you little.
+- `output_dim` is small (roughly single-digit) — the RealNVP split is not a bottleneck at d = 2 or 3, and MAF buys you little.
 - You are sampling many observations interactively, or the posterior draws are consumed in a loop you cannot batch.
 - You want the shortest path to a stable, reproducible result with fewer moving parts.
 
@@ -408,7 +408,7 @@ calibration on held-out data, and let the diagnostics decide.
 | Per-layer conditioning | Other half of `theta` + `x` | Full prefix `theta_{1..j-1}` + `x` |
 | Mixing mechanism | Half-swap | `torch_flip` permutation between blocks |
 | Forward pass | Parallel | Parallel |
-| Inverse pass | Single sweep, flat in `dim_theta` | `n_blocks * dim_theta` masked passes |
+| Inverse pass | Single sweep, flat in `output_dim` | `n_blocks * output_dim` masked passes |
 | Facade defaults | `n_layers = 4`, `hidden_dim = 32` | `n_blocks` from `n_layers`, `n_layers_per_block = 2` |
 | Round-trip error | ~1e-7 to 1e-6 (float32 floor) | ~1e-7 to 1e-6; both grow with depth |
 | Best for | Fast sampling, low-d, stable runs | Strong sequential dependence, higher d |

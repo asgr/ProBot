@@ -8,13 +8,13 @@ coupling layers. This is the \code{style = "nsf"} architecture of
 }
 \usage{
 probotFlowNSF(
-  dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
+  input_dim, output_dim, n_layers = 4, hidden_dim = 32,
   n_bins = 8, tail_bound = 3, device = NULL
 )
 }
 \arguments{
-\item{dim_theta}{Total dimensionality of the parameter space; must be at least 2.}
-\item{dim_x}{Dimensionality of the conditioning features.}
+\item{input_dim}{Dimensionality of the conditioning features.}
+\item{output_dim}{Total dimensionality of the parameter space; must be at least 2.}
 \item{n_layers}{Number of spline coupling layers.}
 \item{hidden_dim}{Width of each conditioner network's hidden layers.}
 \item{n_bins}{Number of rational-quadratic bins per transformed coordinate.}
@@ -36,7 +36,7 @@ RealNVP.
 \code{\link{probotFlowMAF}}, \code{\link{probotTrainFlow}}.}
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
-  flow <- probotFlowNSF(dim_theta = 2, dim_x = 3, device = "cpu")
+  flow <- probotFlowNSF(input_dim = 3, output_dim = 2, device = "cpu")
   out <- flow$forward(torch::torch_randn(c(10, 2)),
                       torch::torch_randn(c(10, 3)))
   names(out)

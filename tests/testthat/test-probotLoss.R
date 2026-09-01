@@ -90,10 +90,10 @@ test_that("probotLossHuber with default delta works", {
 
 test_that("probotLossNF returns a scalar tensor", {
   set.seed(42)
-  dim_theta <- 4; dim_x <- 2; batch <- 4
-  model <- probotMakeFlow(dim_theta, dim_x, n_layers = 2, hidden_dim = 8)()
-  theta <- torch_randn(batch, dim_theta)
-  x <- torch_randn(batch, dim_x)
+  output_dim <- 4; input_dim <- 2; batch <- 4
+  model <- probotMakeFlow(input_dim, output_dim, n_layers = 2, hidden_dim = 8)()
+  theta <- torch_randn(batch, output_dim)
+  x <- torch_randn(batch, input_dim)
   theta <- theta$to(device = model$parameters[[1]]$device)
   x <- x$to(device = model$parameters[[1]]$device)
 
