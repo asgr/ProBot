@@ -14,7 +14,7 @@ probotSamplePostNF(
   col_means = NULL,
   col_sds = NULL,
   col_names = NULL,
-  dim_theta = NULL,
+  output_dim = NULL,
   device = NULL,
   batch_size = NULL,
   verbose = FALSE
@@ -38,9 +38,9 @@ probotSamplePostNF(
 
    \item{col_names}{Character vector of column names to assign to the output matrix.}
 
-   \item{dim_theta}{Integer specifying the parameter dimensionality. Only needed when
+   \item{output_dim}{Integer specifying the output parameter dimensionality. Only needed when
    \code{col_means} is \code{NULL} (i.e., when no scaling is applied). If both
-   \code{dim_theta} and \code{col_means} are \code{NULL}, the function throws an error.}
+   \code{output_dim} and \code{col_means} are \code{NULL}, the function throws an error.}
 
    \item{device}{Torch device string (e.g., "cpu", "mps"). Defaults to \code{NULL},
    which auto-detects from the model's parameters.}

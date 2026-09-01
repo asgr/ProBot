@@ -413,10 +413,10 @@ probotFlowRealNVP <- nn_module(
     raw_derivatives <- raw$narrow(3, 2 * self$n_bins + 1, self$n_bins - 1)
     widths <- self$min_bin_width +
       (2 * self$tail_bound - self$min_bin_width * self$n_bins) *
-      torch_softmax(raw_widths, dim = 3)
+      nnf_softmax(raw_widths, dim = 3)
     heights <- self$min_bin_height +
       (2 * self$tail_bound - self$min_bin_height * self$n_bins) *
-      torch_softmax(raw_heights, dim = 3)
+      nnf_softmax(raw_heights, dim = 3)
     derivatives <- self$min_derivative + nnf_softplus(raw_derivatives)
     boundary <- torch_ones(c(raw$size(1), self$d2, 1), dtype = dtype, device = device)
     list(
@@ -487,41 +487,6 @@ probotFlowNSF <- nn_module(
   }
 )
 
-probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
-                           n_blocks = 5, n_layers_per_block = 2,
-                           soft_clamp = 3, device = NULL, style = "realnvp",
-                           n_bins = 8, tail_bound = 3, ...) {
-  # Facade so probotLoad()'s "flow" reconstruction works. Returns a
-  # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
-  # Disambiguates the available flow architectures:
-  #   style = "realnvp" -> stacked affine RealNVP layers (default)
-  #   style = "maf"     -> masked autoregressive blocks + permutation layers
-  #   style = "nsf"     -> stacked rational-quadratic spline coupling layers
-  match.arg(style, c("realnvp", "maf", "nsf"))
-  function() {
-    # Calling a named nn_module with its constructor args already returns an
-    # instantiated module, so no trailing `()` is added here.
-    switch(style,
-      realnvp = probotFlowRealNVP(
-        input_dim = input_dim, output_dim = output_dim, n_layers = n_layers,
-        hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
-      ),
-      # hidden_dim is passed through untouched (no clamping) so that a
-      # save -> load round trip reconstructs the exact architecture.
-      maf = probotFlowMAF(
-        input_dim = input_dim, output_dim = output_dim, n_blocks = n_blocks,
-        n_layers_per_block = 2, hidden_dim = hidden_dim,
-        soft_clamp = soft_clamp, device = device
-      ),
-      nsf = probotFlowNSF(
-        input_dim = input_dim, output_dim = output_dim, n_layers = n_layers,
-        hidden_dim = hidden_dim, n_bins = n_bins, tail_bound = tail_bound,
-        device = device
-      )
-    )
-  }
-}
-
 probotFlowMAF <- nn_module(
   "probotFlowMAF",
   initialize = function(input_dim, output_dim, n_blocks = 5, n_layers_per_block = 2, hidden_dim = 500, soft_clamp = 3, device = NULL) {
@@ -578,3 +543,39 @@ probotFlowMAF <- nn_module(
     return(current_theta)
   }
 )
+
+probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
+                           n_blocks = 5, n_layers_per_block = 2,
+                           soft_clamp = 3, device = NULL, style = "realnvp",
+                           n_bins = 8, tail_bound = 3, ...) {
+  # Facade so probotLoad()'s "flow" reconstruction works. Returns a
+  # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
+  # Disambiguates the available flow architectures:
+  #   style = "realnvp" -> stacked affine RealNVP layers (default)
+  #   style = "maf"     -> masked autoregressive blocks + permutation layers
+  #   style = "nsf"     -> stacked rational-quadratic spline coupling layers
+  match.arg(style, c("realnvp", "maf", "nsf"))
+  output = function() {
+    # Calling a named nn_module with its constructor args already returns an
+    # instantiated module, so no trailing `()` is added here.
+    switch(style,
+           realnvp = probotFlowRealNVP(
+             input_dim = input_dim, output_dim = output_dim, n_layers = n_layers,
+             hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
+           ),
+           # hidden_dim is passed through untouched (no clamping) so that a
+           # save -> load round trip reconstructs the exact architecture.
+           maf = probotFlowMAF(
+             input_dim = input_dim, output_dim = output_dim, n_blocks = n_blocks,
+             n_layers_per_block = 2, hidden_dim = hidden_dim,
+             soft_clamp = soft_clamp, device = device
+           ),
+           nsf = probotFlowNSF(
+             input_dim = input_dim, output_dim = output_dim, n_layers = n_layers,
+             hidden_dim = hidden_dim, n_bins = n_bins, tail_bound = tail_bound,
+             device = device
+           )
+    )
+  }
+  return(output())
+}

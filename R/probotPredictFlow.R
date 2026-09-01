@@ -4,7 +4,7 @@ probotSamplePostNF <- function(input,
                                col_means = NULL,
                                col_sds = NULL,
                                col_names = NULL,
-                               dim_theta = NULL,
+                               output_dim = NULL,
                                device = NULL,
                                batch_size = NULL,
                                verbose = FALSE) {
@@ -12,12 +12,12 @@ probotSamplePostNF <- function(input,
   # Determine parameter dimensionality
   # ------------------------------------------------------------------
 
-  if (!is.null(dim_theta)) {
-    n_dim <- dim_theta
-  } else if (!is.null(col_means)) {
-    n_dim <- length(col_means)
-  } else {
-    stop("Either 'dim_theta' or 'col_means' must be provided.")
+  if (is.null(output_dim)) {
+    if (!is.null(col_means)) {
+      output_dim <- length(col_means)
+    } else {
+      stop("Either 'output_dim' or 'col_means' must be provided.")
+    }
   }
 
   if (!is.null(col_means) && is.null(col_sds)) {
@@ -65,9 +65,9 @@ probotSamplePostNF <- function(input,
     means_t <- torch_tensor(col_means, dtype = torch_float(), device = device)
     sds_t <- torch_tensor(col_sds, dtype = torch_float(), device = device)
 
-    # Recycle length-1 vectors to n_dim (mirrors probotScaleBackward).
-    if (means_t$size(1) == 1L) means_t <- means_t$expand(c(n_dim))
-    if (sds_t$size(1) == 1L) sds_t <- sds_t$expand(c(n_dim))
+    # Recycle length-1 vectors to output_dim (mirrors probotScaleBackward).
+    if (means_t$size(1) == 1L) means_t <- means_t$expand(c(output_dim))
+    if (sds_t$size(1) == 1L) sds_t <- sds_t$expand(c(output_dim))
   }
 
   if (input$dim() == 1L) {
@@ -79,7 +79,7 @@ probotSamplePostNF <- function(input,
   # ------------------------------------------------------------------
 
   if (input$dim() == 2L && input$size(1) == 1) {
-    z_base <- torch_randn(c(n_samples, n_dim), device = device)
+    z_base <- torch_randn(c(n_samples, output_dim), device = device)
 
     context_expanded <- input$expand(c(n_samples, input$size(2)))
 
@@ -101,7 +101,7 @@ probotSamplePostNF <- function(input,
   # ------------------------------------------------------------------
   # MULTI-OBSERVATION MODE
   # input shape:   (N_obs, N_features)
-  # returns:       array of shape (n_samples, n_dim, N_obs)
+  # returns:       array of shape (n_samples, output_dim, N_obs)
   #
   # Observations are processed in chunks of `batch_size` rows so the
   # large temporaries (z, expanded context, theta) stay bounded in
@@ -130,7 +130,7 @@ probotSamplePostNF <- function(input,
   progress_every <- max(1L, floor(n_chunks / 20))
 
   # Pre-allocate the full output once: (Sample, Parameter, Observation).
-  out <- array(NA_real_, c(n_samples, n_dim, N_obs))
+  out <- array(NA_real_, c(n_samples, output_dim, N_obs))
 
   chunk_i <- 0L
 
@@ -142,9 +142,9 @@ probotSamplePostNF <- function(input,
     # Conditioning rows for this chunk: (B, N_feat); torch narrow is 1-based
     ctx_chunk <- input$narrow(1, start, B)
 
-    # Latent samples for this chunk: (B, n_samples, n_dim)
-    z_chunk <- torch_randn(c(B, n_samples, n_dim), device = device)
-    z_flat <- z_chunk$reshape(c(B * n_samples, n_dim))
+    # Latent samples for this chunk: (B, n_samples, output_dim)
+    z_chunk <- torch_randn(c(B, n_samples, output_dim), device = device)
+    z_flat <- z_chunk$reshape(c(B * n_samples, output_dim))
 
     # Duplicate each context row n_samples times: (B*n_samples, N_feat)
     context_flat <-
@@ -153,7 +153,7 @@ probotSamplePostNF <- function(input,
       )
 
     with_no_grad({
-      theta_flat <- model$inverse(z_flat, context_flat) # (B*n_samples, n_dim)
+      theta_flat <- model$inverse(z_flat, context_flat) # (B*n_samples, output_dim)
     })
 
     # Unscale on-device in one fused broadcast.
@@ -161,8 +161,8 @@ probotSamplePostNF <- function(input,
       theta_flat <- theta_flat * sds_t + means_t
     }
 
-    # (B, n_samples, n_dim) -> (n_samples, n_dim, B) to match `out`.
-    block <- theta_flat$reshape(c(B, n_samples, n_dim))$permute(c(2, 3, 1))
+    # (B, n_samples, output_dim) -> (n_samples, output_dim, B) to match `out`.
+    block <- theta_flat$reshape(c(B, n_samples, output_dim))$permute(c(2, 3, 1))
 
     out[, , start:end] <- as.array(block$cpu())
 
