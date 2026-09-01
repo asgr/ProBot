@@ -336,8 +336,8 @@ probotFlowCouple <- nn_module(
   heights_bin <- select_bin(heights)
   left_bin <- select_bin(left_edges)
   bottom_bin <- select_bin(bottom_edges)
-  # The K bins use K+1 knot derivatives: each narrow selects one endpoint
-  # derivative pair for every bin.
+  # The K bins use K+1 knot derivatives; these slices select each bin's
+  # left and right endpoint derivatives, respectively.
   derivatives_left <- select_bin(derivatives$narrow(3, 1, n_bins))
   derivatives_right <- select_bin(derivatives$narrow(3, 2, n_bins))
   delta <- heights_bin / widths_bin
@@ -466,7 +466,8 @@ probotFlowNSF <- nn_module(
 
   forward = function(theta, x) {
     z <- theta
-    log_det_jac <- torch_zeros(c(theta$size(1), 1), device = theta$device)
+    log_det_jac <- torch_zeros(c(theta$size(1), 1), dtype = theta$dtype,
+                               device = theta$device)
     for (i in seq_len(self$n_layers)) {
       out <- self[[paste0("spline_layer_", i)]]$forward(z, x)
       z <- out$z
