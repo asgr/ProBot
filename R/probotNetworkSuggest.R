@@ -14,7 +14,7 @@ probotNetworkSuggest = function(input_dim,
 
   # flow_style is only meaningful for type = "Flow", but validated up front so
   # an invalid value fails fast regardless of type.
-  flow_style = match.arg(tolower(flow_style), c("couple", "autoreg"))
+  flow_style = match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
 
   stopifnot(
     is.numeric(input_dim),
@@ -154,7 +154,7 @@ probotNetworkSuggest = function(input_dim,
                        }
                        n_layers = pmax(4L, pmin(24L, as.integer(round(n_layers))))
                        hidden_dim = pmax(32L, pmin(512L, n_ref))
-                     } else {
+                     } else if (flow_style == "autoreg") {
                        # Fewer blocks (prefix conditioning is built in); scaled
                        # conservatively since each block is dim_theta sequential
                        # masked passes when sampling.
@@ -164,6 +164,15 @@ probotNetworkSuggest = function(input_dim,
                        }
                        n_layers = pmax(3L, pmin(10L, as.integer(round(n_layers))))
                        # Width is comparatively free at sample time -> overprovision.
+                       hidden_dim = pmax(64L, pmin(512L, .round_to_nice(1.5 * n_ref)))
+                      } else {
+                       # Rational-quadratic spline coupling is more expressive
+                       # than affine coupling while retaining parallel sampling.
+                       n_layers = pmax(4L, pmin(12L, 4L + ceiling(output_dim / 2)))
+                       if (!is.null(n_train)) {
+                         n_layers = n_layers * pmin(1.5, log10(n_train) / 5)
+                       }
+                       n_layers = pmax(4L, pmin(12L, as.integer(round(n_layers))))
                        hidden_dim = pmax(64L, pmin(512L, .round_to_nice(1.5 * n_ref)))
                      }
 
@@ -179,7 +188,7 @@ probotNetworkSuggest = function(input_dim,
                          (hidden_dim + 1) * hidden_dim +
                          (hidden_dim + 1) * (2 * d2)
                        n_params = as.numeric(n_layers) * per_layer
-                     } else {
+                     } else if (flow_style == "autoreg") {
                        # Each autoreg block: masked MLP (d_theta + dim_x) -> h -> h -> 2*d_theta
                        # (n_layers_per_block is fixed at 2 by probotMakeFlow());
                        # permutation layers are parameter-free.
@@ -187,25 +196,38 @@ probotNetworkSuggest = function(input_dim,
                          (hidden_dim + 1) * hidden_dim +
                          (hidden_dim + 1) * (2 * output_dim)
                        n_params = as.numeric(n_layers) * per_block
+                      } else {
+                       d1 = floor(output_dim / 2)
+                       d2 = output_dim - d1
+                       n_bins = 8L
+                       # Spline conditioner: (d1 + dim_x) -> h -> h -> d2*(3K-1).
+                       per_layer = (d1 + input_dim + 1) * hidden_dim +
+                         (hidden_dim + 1) * hidden_dim +
+                         (hidden_dim + 1) * (d2 * (3 * n_bins - 1))
+                       n_params = as.numeric(n_layers) * per_layer
                      }
 
-                     suggestion = list(
+                     suggestion = c(list(
                        dim_x      = input_dim,
                        dim_theta  = output_dim,
                        n_layers   = n_layers,
                        hidden_dim = hidden_dim,
-                       style      = flow_style,
-                       n_params   = n_params
-                     )
+                       style      = flow_style
+                     ),
+                     if (flow_style == "nsf") list(n_bins = 8L) else list(),
+                     list(n_params = n_params))
                      if (verbose) {
                        .suggest_print(
-                         if (flow_style == "couple") "Flow (coupling)" else "Flow (autoreg)",
+                         switch(flow_style,
+                                couple = "Flow (coupling)",
+                                autoreg = "Flow (autoreg)",
+                                nsf = "Flow (Neural Spline)"),
                          input_dim,
                          output_dim,
                          n_train,
-                         if (flow_style == "couple") "style      : couple" else "style      : autoreg",
+                         sprintf("style      : %s", flow_style),
                          sprintf("n_layers   : %d%s", n_layers,
-                                 if (flow_style == "couple") "" else "  (autoregressive blocks)"),
+                                 if (flow_style == "autoreg") "  (autoregressive blocks)" else ""),
                          sprintf("hidden_dim : %d", hidden_dim),
                          .suggest_params_line(n_params)
                        )

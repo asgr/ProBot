@@ -20,6 +20,8 @@ probotSave <- function(
     hidden_dims = NULL,
     n_blocks = NULL,
     n_layers_per_block = NULL,
+    n_bins = NULL,
+    tail_bound = NULL,
     activation_name = NULL,
     dropout = NULL,
     soft_clamp = NULL,
@@ -34,13 +36,18 @@ probotSave <- function(
 
   # For flow models, record which architecture the checkpoint holds so
   # probotLoad() can reconstruct the correct skeleton. Infer it from the
-  # model's class when not given explicitly (a probotFlowAutoReg instance
-  # reports "autoreg"; anything else is treated as the coupling default).
+  # model's class when not given explicitly.
   if (model_type == "flow") {
     if (is.null(flow_style)) {
-      flow_style <- if (any(grepl("AutoReg", class(model)))) "autoreg" else "couple"
+      flow_style <- if (any(grepl("AutoReg", class(model)))) {
+        "autoreg"
+      } else if (any(grepl("NSF", class(model)))) {
+        "nsf"
+      } else {
+        "couple"
+      }
     } else {
-      flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg"))
+      flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
     }
   } else {
     flow_style <- NULL
@@ -80,6 +87,8 @@ probotSave <- function(
       hidden_dims     = hidden_dims,
       n_blocks        = n_blocks,
       n_layers_per_block = n_layers_per_block,
+      n_bins          = n_bins,
+      tail_bound      = tail_bound,
       activation      = activation_name,
       dropout         = dropout,
       soft_clamp      = soft_clamp,
@@ -166,7 +175,7 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
   # saved in metadata. It is the escape hatch for loading older flow
   # checkpoints saved before flow_style was recorded in the metadata block.
   if (!is.null(flow_style)) {
-    flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg"))
+    flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
   }
 
   required <- .probotRequired[[model_type]]
@@ -222,6 +231,8 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
       hidden_dim  = if (!is.null(meta$hidden_dim)) meta$hidden_dim else 32,
       n_blocks  = if (!is.null(meta$n_blocks)) meta$n_blocks else 5,
       n_layers_per_block = if (!is.null(meta$n_layers_per_block)) meta$n_layers_per_block else 2,
+      n_bins = if (!is.null(meta$n_bins)) meta$n_bins else 8,
+      tail_bound = if (!is.null(meta$tail_bound)) meta$tail_bound else 3,
       soft_clamp  = if (!is.null(meta$soft_clamp)) meta$soft_clamp else 3,
       # Priority: explicit override > saved metadata > "couple" (legacy default).
       style       = if (!is.null(flow_style)) flow_style else
