@@ -47,7 +47,7 @@ test_that("probotMakeFlow returns an nn_module", {
 })
 
 test_that("probotMakeFlow forward returns z and log_det_jac", {
-  mdl <- probotMakeFlow(4, 2, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
   theta <- torch_randn(4, 4)
   x <- torch_randn(4, 2)
 
@@ -58,7 +58,7 @@ test_that("probotMakeFlow forward returns z and log_det_jac", {
 })
 
 test_that("probotMakeFlow inverse returns theta of correct shape", {
-  mdl <- probotMakeFlow(4, 2, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
   z <- torch_randn(4, 4)
   x <- torch_randn(4, 2)
 
@@ -67,7 +67,7 @@ test_that("probotMakeFlow inverse returns theta of correct shape", {
 })
 
 test_that(".probotRealNVPLayer forward and inverse are consistent", {
-  layer <- ProBot:::.probotRealNVPLayer(4, 2, hidden_dim = 8, device = "cpu")
+  layer <- ProBot:::.probotRealNVPLayer(2, 4, hidden_dim = 8, device = "cpu")
   theta <- torch_randn(2, 4)
   x <- torch_randn(2, 2)
 
@@ -83,7 +83,7 @@ test_that(".probotRealNVPLayer forward and inverse are consistent", {
 
 test_that("probotMakeFlow forward then inverse recovers input", {
   set.seed(123)
-  mdl <- probotMakeFlow(6, 3, n_layers = 3, hidden_dim = 16, device = "cpu")()
+  mdl <- probotMakeFlow(3, 6, n_layers = 3, hidden_dim = 16, device = "cpu")()
   theta <- torch_randn(2, 6)
   x <- torch_randn(2, 3)
 
@@ -99,7 +99,7 @@ test_that("probotMakeFlow forward then inverse recovers input", {
 
 test_that("Neural Spline Flow forward and inverse are consistent", {
   set.seed(123)
-  mdl <- probotMakeFlow(4, 2, n_layers = 3, hidden_dim = 16, n_bins = 8,
+  mdl <- probotMakeFlow(2, 4, n_layers = 3, hidden_dim = 16, n_bins = 8,
                         style = "nsf", device = "cpu")()
   theta <- torch_randn(3, 4)
   x <- torch_randn(3, 2)
@@ -114,7 +114,8 @@ test_that("Neural Spline Flow forward and inverse are consistent", {
 })
 
 test_that("Neural Spline Flow has identity tails", {
-  mdl <- probotMakeFlow(2, 1, n_layers = 1, hidden_dim = 8, style = "nsf",
+  # input_dim = 1 (context), output_dim = 2 (parameter space)
+  mdl <- probotMakeFlow(1, 2, n_layers = 1, hidden_dim = 8, style = "nsf",
                         device = "cpu")()
   theta <- torch_tensor(matrix(c(10, -10), nrow = 1))
   x <- torch_zeros(1, 1)
@@ -122,6 +123,44 @@ test_that("Neural Spline Flow has identity tails", {
 
   expect_equal(as.numeric(out$z), as.numeric(c(-10, 10)), tolerance = 1e-6)
   expect_equal(as.numeric(out$log_det_jac), 0, tolerance = 1e-6)
+})
+
+test_that("Neural Spline Flow backward is finite through identity tails", {
+  # Regression: the spline is the identity outside [-tail_bound, tail_bound],
+  # passed through torch_where(). torch_where still routes grad*0 into the
+  # unselected (tail) branch, and that branch used to compute a 0/0 -> NaN, so
+  # any point beyond the tail silently poisoned every downstream gradient.
+  # Force tail points (|theta| > 3) and check the loss backward is NaN-free.
+  set.seed(7)
+  mdl <- probotMakeFlow(4, 3, n_layers = 2, hidden_dim = 16, n_bins = 8,
+                        style = "nsf", device = "cpu")()
+  mdl$train()
+
+  # theta deliberately spans beyond the tail_bound = 3 in both directions
+  theta <- torch_tensor(matrix(
+    c(1.0, -1.0, 0.0,  5.0, -5.0, 0.0,  0.5, -3.5, 1.5), nrow = 3, byrow = TRUE
+  ))
+  x <- torch_randn(3, 4)
+
+  loss <- probotLossNF(theta, x, mdl)
+  expect_false(is.na(loss$item()))
+  loss$backward()
+
+  for (p in mdl$parameters) {
+    if (!is.null(p$grad)) {
+      expect_equal(torch_isnan(p$grad)$sum()$item(), 0)
+      expect_false(is.na(p$grad$abs()$max()$item()))
+    }
+  }
+
+  # Inverse (sampling) path: gradient through out-of-domain base draws must be
+  # finite too. Base draws scaled up so some values land beyond tail_bound = 3.
+  mdl$eval()
+  z <- (torch_randn(3, 3) * 1.5)$requires_grad_(TRUE)
+  theta_hat <- mdl$inverse(z, x)
+  expect_equal(torch_isnan(theta_hat)$sum()$item(), 0)
+  (theta_hat^2)$sum()$backward()
+  expect_equal(torch_isnan(z$grad)$sum()$item(), 0)
 })
 
 # ---- probotNetworkSuggest tests ----
@@ -263,6 +302,15 @@ test_that("probotNetworkSuggest hidden_dims clamped to [32, 1024]", {
   expect_lte(s2$hidden_dims[1], 1024L)
 })
 
+# ---- n_params tests ----
+
+# Defined before its first use below: testthat evaluates the file top to
+# bottom, so a helper declared after the tests that call it is not yet in
+# scope when those tests run.
+.count_params <- function(mdl) {
+  sum(vapply(mdl$parameters, function(p) prod(as.integer(p$shape)), numeric(1)))
+}
+
 test_that("probotNetworkSuggest Point output plugs into probotMakePoint", {
   s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
   mdl <- do.call(probotMakePoint, c(s, list(device = "cpu")))()
@@ -324,10 +372,6 @@ test_that("probotNetworkSuggest MDN components correct for odd output_dim", {
 })
 
 # ---- n_params tests ----
-
-.count_params <- function(mdl) {
-  sum(vapply(mdl$parameters, function(p) prod(as.integer(p$shape)), numeric(1)))
-}
 
 test_that("probotNetworkSuggest n_params matches actual Point model", {
   s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)

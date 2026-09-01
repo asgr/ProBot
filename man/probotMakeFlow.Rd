@@ -14,7 +14,7 @@ comparison and guidance on choosing between them.
 }
 \usage{
 probotMakeFlow(input_dim, output_dim,
-  n_layers = 4, hidden_dim = 32, n_blocks = 5, n_layers_per_block = 2,
+  n_layers = 4, hidden_dim = 32, n_blocks = NULL, n_layers_per_block = 2,
   soft_clamp = 3, device = NULL, style = "realnvp", n_bins = 8, tail_bound = 3
 )
 }
@@ -24,7 +24,11 @@ probotMakeFlow(input_dim, output_dim,
 
     \item{output_dim}{Total dimensionality of the parameter space.}
 
-    \item{n_layers}{Number of RealNVP layers to stack. Defaults to 4.}
+    \item{n_layers}{Number of layers to stack: RealNVP layers when
+    \code{style = "realnvp"}, spline coupling layers when \code{style = "nsf"}.
+    When \code{style = "maf"} and \code{n_blocks} is \code{NULL} (the default)
+    this is used as the number of autoregressive blocks, so the output of
+    \code{\link{probotNetworkSuggest}} can be passed straight in. Defaults to 4.}
 
     \item{hidden_dim}{Number of units in each hidden layer of the internal
     shift/scale network within each RealNVP layer, or of the masked MLP in
@@ -34,7 +38,9 @@ probotMakeFlow(input_dim, output_dim,
     \code{\link{probotFlowMAF}} directly instead uses their own
     defaults (32 and 500 respectively).}
 
-    \item{n_blocks}{Number of autoregressive blocks when \code{style = "maf"}}
+    \item{n_blocks}{Number of autoregressive blocks when \code{style = "maf"}.
+    Defaults to \code{NULL}, meaning \code{n_layers} is used; set it explicitly
+    to decouple block count from \code{n_layers}. Ignored by the other styles.}
 
     \item{n_layers_per_block}{Number of layers per block when \code{style = "maf"}}
 

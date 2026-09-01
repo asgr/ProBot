@@ -12,7 +12,7 @@ test_that("probotSamplePostNF returns correct dimensions", {
   n_samples <- 200
 
   samples <- probotSamplePostNF(input, mdl, n_samples = n_samples,
-                                  dim_theta = output_dim)
+                                  output_dim = output_dim)
   expect_equal(dim(samples), c(n_samples, output_dim))
 })
 
@@ -42,7 +42,7 @@ test_that("probotSamplePostNF errors without dim info", {
 
   expect_error(
     probotSamplePostNF(input, mdl, n_samples = 100),
-    "Either 'dim_theta' or 'col_means'"
+    "Either 'output_dim' or 'col_means'"
   )
 })
 
@@ -56,7 +56,7 @@ test_that("probotSamplePostNF sets column names", {
   names <- paste0("theta_", 1:output_dim)
 
   samples <- probotSamplePostNF(input, mdl, n_samples = 100,
-                                  dim_theta = output_dim, col_names = names)
+                                  output_dim = output_dim, col_names = names)
   expect_equal(colnames(samples), names)
 })
 
@@ -68,7 +68,7 @@ test_that("probotSamplePostNF accepts torch tensor input", {
 
   input_torch <- torch_randn(input_dim)  # 1D tensor
   samples <- probotSamplePostNF(input_torch, mdl, n_samples = 100,
-                                  dim_theta = output_dim)
+                                  output_dim = output_dim)
   expect_equal(dim(samples), c(100, output_dim))
 })
 
@@ -96,7 +96,7 @@ test_that("probotSamplePostNF with matrix input works", {
   input <- matrix(runif(input_dim), nrow = 1, ncol = input_dim)
 
   samples <- probotSamplePostNF(input, mdl, n_samples = 100,
-                                  dim_theta = output_dim)
+                                  output_dim = output_dim)
   expect_equal(dim(samples), c(100, output_dim))
 })
 
@@ -109,7 +109,7 @@ test_that("probotSamplePostNF multi-obs handles partial final chunk", {
   input <- matrix(runif(7 * input_dim), nrow = 7)
 
   samples <- probotSamplePostNF(input, mdl, n_samples = 6,
-                                  dim_theta = output_dim,
+                                  output_dim = output_dim,
                                   col_names = paste0("p", 1:output_dim),
                                   device = "cpu",
                                   batch_size = 3)
@@ -136,7 +136,7 @@ test_that("probotSamplePostNF multi-obs unscaling is exact for an identity flow"
 
   samples <- probotSamplePostNF(input, mock, n_samples = n_samples,
                                   col_means = col_means, col_sds = col_sds,
-                                  dim_theta = output_dim, device = "cpu",
+                                  output_dim = output_dim, device = "cpu",
                                   batch_size = n_obs)
 
   z_ref <- as.matrix(mock$z_seen$cpu()) # (n_obs*n_samples, output_dim)

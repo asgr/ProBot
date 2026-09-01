@@ -327,9 +327,27 @@ probotFlowRealNVP <- nn_module(
 
   coordinate <- if (inverse) bottom_edges else left_edges
   coordinate_next <- coordinate + if (inverse) heights else widths
-  expanded_input <- input$unsqueeze(3)
+
+  # The spline is the identity outside [-tail_bound, tail_bound]; points there
+  # are passed through verbatim at the end via torch_where(). But torch_where's
+  # autograd still multiplies the gradient by the (unselected) result branch,
+  # and 0 * NaN = NaN. For a point outside the domain the bin mask below is
+  # empty, so the polynomial computes a 0/0 and produces NaN in that
+  # unselected branch, which poisons every downstream gradient. We therefore
+  # feed a domain-clamped copy (ic) into the bin selection and the polynomial:
+  # for points inside the domain the clamp is a no-op (identical value and
+  # gradient), and for points outside it keeps the unselected branch finite so
+  # no NaN propagates. The zero-selection guard additionally covers the exact
+  # boundary measure, where clamping alone would still select no bin.
+  ic <- torch_clamp(input, min = -tail_bound, max = tail_bound)
+  expanded_input <- ic$unsqueeze(3)
   bin_mask <- (expanded_input >= coordinate) & (expanded_input < coordinate_next)
   bin_mask <- bin_mask$to(dtype = dtype)
+  bin_mask <- torch_where(
+    bin_mask$sum(dim = 3, keepdim = TRUE) == 0,
+    torch_ones_like(bin_mask),
+    bin_mask
+  )
 
   select_bin <- function(values) (values * bin_mask)$sum(dim = 3)
   widths_bin <- select_bin(widths)
@@ -344,7 +362,7 @@ probotFlowRealNVP <- nn_module(
   inside <- (input > -tail_bound) & (input < tail_bound)
 
   if (inverse) {
-    y_minus_bottom <- input - bottom_bin
+    y_minus_bottom <- ic - bottom_bin
     a <- y_minus_bottom * (derivatives_left + derivatives_right - 2 * delta) +
       heights_bin * (delta - derivatives_left)
     b <- heights_bin * derivatives_left -
@@ -358,7 +376,7 @@ probotFlowRealNVP <- nn_module(
     return(torch_where(inside, result, input))
   }
 
-  theta <- (input - left_bin) / widths_bin
+  theta <- (ic - left_bin) / widths_bin
   theta_one_minus <- theta * (1 - theta)
   numerator <- heights_bin * (delta * theta^2 + derivatives_left * theta_one_minus)
   denominator <- delta +
@@ -545,7 +563,7 @@ probotFlowMAF <- nn_module(
 )
 
 probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
-                           n_blocks = 5, n_layers_per_block = 2,
+                           n_blocks = NULL, n_layers_per_block = 2,
                            soft_clamp = 3, device = NULL, style = "realnvp",
                            n_bins = 8, tail_bound = 3, ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
@@ -555,6 +573,13 @@ probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
   #   style = "maf"     -> masked autoregressive blocks + permutation layers
   #   style = "nsf"     -> stacked rational-quadratic spline coupling layers
   match.arg(style, c("realnvp", "maf", "nsf"))
+
+  # Depth for style = "maf" is expressed in blocks, but probotNetworkSuggest()
+  # reports it as n_layers (and its n_params heuristic counts exactly n_layers
+  # blocks). Map n_layers -> n_blocks so a suggestion can be piped straight in;
+  # an explicit n_blocks still wins.
+  maf_blocks <- if (!is.null(n_blocks)) n_blocks else n_layers
+
   output = function() {
     # Calling a named nn_module with its constructor args already returns an
     # instantiated module, so no trailing `()` is added here.
@@ -566,7 +591,7 @@ probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
            # hidden_dim is passed through untouched (no clamping) so that a
            # save -> load round trip reconstructs the exact architecture.
            maf = probotFlowMAF(
-             input_dim = input_dim, output_dim = output_dim, n_blocks = n_blocks,
+             input_dim = input_dim, output_dim = output_dim, n_blocks = maf_blocks,
              n_layers_per_block = 2, hidden_dim = hidden_dim,
              soft_clamp = soft_clamp, device = device
            ),
@@ -577,5 +602,8 @@ probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
            )
     )
   }
-  return(output())
+  # Return the zero-arg constructor itself, matching probotMakeMDN()/
+  # probotMakePoint() and the `probotMakeX(...)()` call pattern used by
+  # probotLoad(), the tests, and the vignettes.
+  return(output)
 }

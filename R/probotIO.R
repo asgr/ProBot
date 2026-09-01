@@ -246,7 +246,11 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
       output_dim  = meta$output_dim,
       n_layers    = if (!is.null(meta$n_layers)) meta$n_layers else 4,
       hidden_dim  = if (!is.null(meta$hidden_dim)) meta$hidden_dim else 32,
-      n_blocks  = if (!is.null(meta$n_blocks)) meta$n_blocks else 5,
+      # Pass n_blocks through untouched (NULL when absent) so probotMakeFlow()
+      # can map the saved n_layers onto it for style = "maf". Substituting a
+      # non-NULL default here would win over n_layers and reconstruct a flow
+      # with the wrong depth, failing the state_dict load.
+      n_blocks  = meta$n_blocks,
       n_layers_per_block = if (!is.null(meta$n_layers_per_block)) meta$n_layers_per_block else 2,
       n_bins = if (!is.null(meta$n_bins)) meta$n_bins else 8,
       tail_bound = if (!is.null(meta$tail_bound)) meta$tail_bound else 3,
