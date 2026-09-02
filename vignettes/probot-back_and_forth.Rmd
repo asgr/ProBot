@@ -187,8 +187,9 @@ Rather than relying only on marginal summaries, we can draw samples directly fro
 index = 1
 
 post_samples <- probotSamplePostMDN(
-  mdn_output = forward_pred,
-  index = index,
+  input = theta_test_scaled[index, ],
+  model = forward_model,
+  mdn_components = 3,
   n_samples = 2000,
   col_means = attr(output_scaled, "col_scale")$col_means,
   col_sds = attr(output_scaled, "col_scale")$col_sds,
@@ -224,7 +225,10 @@ for(i in 1:9){
 The **Probability Integral Transform** (PIT) provides a rigorous marginal calibration check. For each test observation and each output dimension the PIT value is the fraction of posterior samples that fall *below* the true value. Under a perfectly calibrated posterior this quantity is uniformly distributed on [0, 1]: the truth is equally likely to appear anywhere within the predictive distribution.
 
 ```{r, eval=eval_global}
-PIT_out = probotPIT(forward_pred,
+PIT_out = probotPIT(
+            input = theta_test_scaled,
+            model = forward_model,
+            mdn_components = 3,
             params = poly_test$output,
             col_means = attr(output_scaled, "col_scale")$col_means,
             col_sds = attr(output_scaled, "col_scale")$col_sds,
@@ -250,7 +254,9 @@ PIT is computed independently for each output dimension and therefore cannot det
 
 ```{r, eval=eval_global}
 TARP_out_forward = probotTARP(
-  forward_pred,
+  input = theta_test_scaled,
+  model = forward_model,
+  mdn_components = 3,
   params = poly_test$output,
   col_means = attr(output_scaled, "col_scale")$col_means,
   col_sds = attr(output_scaled, "col_scale")$col_sds,
@@ -364,8 +370,9 @@ The posterior samples provide a direct way to inspect uncertainty and possible m
 
 ```{r inverse-samples, eval=eval_global}
 post_samples <- probotSamplePostMDN(
-  mdn_output = inverse_pred,
-  index = 1,
+  input = output_test_scaled[1, ],
+  model = inverse_fit$model,
+  mdn_components = 5,
   n_samples = 2000,
   col_means = attr(input_scaled, "col_scale")$col_means,
   col_sds = attr(input_scaled, "col_scale")$col_sds,
@@ -400,7 +407,9 @@ We repeat the PIT calibration check for the inverse posterior. In the inverse pr
 
 ```{r, eval=eval_global}
 PIT_inverse = probotPIT(
-  inverse_pred,
+  input = output_test_scaled,
+  model = inverse_fit$model,
+  mdn_components = 5,
   params = theta_test,
   col_means = attr(input_scaled, "col_scale")$col_means,
   col_sds = attr(input_scaled, "col_scale")$col_sds,
@@ -418,7 +427,9 @@ Finally, we run the TARP check on the inverse posterior. The inverse problem is 
 
 ```{r, eval=eval_global}
 TARP_inverse = probotTARP(
-  inverse_pred,
+  input = output_test_scaled,
+  model = inverse_fit$model,
+  mdn_components = 5,
   params = theta_test,
   col_means = attr(input_scaled, "col_scale")$col_means,
   col_sds = attr(input_scaled, "col_scale")$col_sds,

@@ -24,90 +24,219 @@ probotPredictMDN <- function(input, model, mdn_components, device = NULL){
 }
 
 probotSamplePostMDN <- function(
-    mdn_output,
-    index = 1,
+    input,
+    model,
+    mdn_components,
     n_samples = 5000,
-    col_means,
-    col_sds,
-    col_names = NULL
+    col_means = NULL,
+    col_sds = NULL,
+    col_names = NULL,
+    device = NULL,
+    batch_size = NULL,
+    verbose = FALSE
 ){
+  # ------------------------------------------------------------------
+  # Sampling mirrors probotSamplePostNF(): the caller supplies the
+  # conditioning inputs (a vector or matrix), not a pre-computed
+  # mdn_output. A vector or single-row matrix returns an
+  # (n_samples, output_dim) matrix; a multi-row matrix returns the
+  # (n_samples, output_dim, N_obs) array.
+  # ------------------------------------------------------------------
 
-  n_dim <- length(col_means)
+  if (!is.null(col_means) && is.null(col_sds)) {
+    stop("col_sds must be provided when col_means is provided.")
+  }
 
-  mdn_components <- length(
-    as.numeric(
-      mdn_output$logits[index,]
+  unscale <- !is.null(col_means)
+
+  n_samples <- as.integer(n_samples)
+
+  if (n_samples < 1L) {
+    stop("'n_samples' must be a positive integer.")
+  }
+
+  # ------------------------------------------------------------------
+  # Device selection
+  # ------------------------------------------------------------------
+
+  if (is.null(device)) {
+    if (length(model$parameters) > 0) {
+      device <- model$parameters[[1]]$device
+    } else {
+      device <-
+        if (backends_mps_is_available()) {
+          torch_device("mps")
+        } else {
+          torch_device("cpu")
+        }
+    }
+  }
+
+  # ------------------------------------------------------------------
+  # Convert input to tensor
+  # ------------------------------------------------------------------
+
+  if (!inherits(input, "torch_tensor")) {
+    input <- torch_tensor(input, dtype = torch_float(), device = device)
+  } else {
+    input <- input$to(device = device)
+  }
+
+  if (input$dim() == 1L) {
+    input <- input$unsqueeze(1)
+  }
+
+  if (input$dim() != 2L) {
+    stop("'input' must be either a vector or a matrix")
+  }
+
+  model$eval()
+
+  N_obs <- input$size(1)
+
+  # Auto-size the chunk so that batch_size * n_samples draw rows are held
+  # in memory at once (~2e6 rows default). True memory use scales with
+  # output_dim as well, since each draw is a full parameter vector; lower
+  # batch_size for wide posteriors or tighter machines.
+  if (is.null(batch_size)) {
+    batch_size <- max(1L, floor(2e6 / n_samples))
+  }
+
+  batch_size <- as.integer(min(batch_size, N_obs))
+
+  n_chunks <- ceiling(N_obs / batch_size)
+  progress_every <- max(1L, floor(n_chunks / 20))
+
+  out <- NULL
+  output_dim <- NA_integer_
+
+  chunk_i <- 0L
+
+  for (start in seq(1L, N_obs, by = batch_size)) {
+    chunk_i <- chunk_i + 1L
+    end <- min(start + batch_size - 1L, N_obs)
+    B <- end - start + 1L
+
+    # Forward pass for this chunk only: rows are the conditioning inputs.
+    pred <- probotPredictMDN(
+      input = input$narrow(1, start, B),
+      model = model,
+      mdn_components = mdn_components,
+      device = device
     )
-  )
 
-  weights <- as.numeric(
-    nnf_softmax(
-      mdn_output$logits[index,],
-      dim = 1
+    # Mixture parameters, brought to R once per chunk: (B, K, D) tensors.
+    mu <- as.array(pred$mu$cpu())
+    log10_sigma <- as.array(pred$log10_sigma$cpu())
+
+    weights <- as.matrix(nnf_softmax(pred$logits, dim = 2)$cpu())
+
+    # Soft clamp matches probotLossMDN()/probotMarginalPostMDN(): sigma is
+    # capped at 1e5 rather than allowed to run away with an unbounded head.
+    sigma <- 10^pmin(pmax(log10_sigma, -5), 5)
+
+    D <- dim(mu)[3]
+
+    if (is.na(output_dim)) {
+      output_dim <- D
+
+      if (unscale) {
+        if (!length(col_means) %in% c(1L, D) || !length(col_sds) %in% c(1L, D)) {
+          stop(
+            "col_means/col_sds must have length 1 or match the model's ",
+            "output dimension (", D, ")."
+          )
+        }
+      }
+
+      out <- array(NA_real_, c(n_samples, D, N_obs))
+    } else if (D != output_dim) {
+      stop("Model output dimension changed between chunks.")
+    }
+
+    # (B, D) slice per component; matrix() guard keeps shape when B == 1.
+    mu_comp <- lapply(
+      seq_len(mdn_components),
+      function(k) matrix(mu[, k, ], nrow = B, ncol = D)
     )
-  )
+    sigma_comp <- lapply(
+      seq_len(mdn_components),
+      function(k) matrix(sigma[, k, ], nrow = B, ncol = D)
+    )
 
-  mu <- as.matrix(
-    mdn_output$mu[
-      index,
-      1:mdn_components,
-      1:n_dim
-    ]
-  )
+    # Component label for every (observation, draw) pair, flattened so that
+    # row f of `theta` is observation ((f - 1) %/% n_samples) + 1.
+    comp <- integer(B * n_samples)
 
-  sigma <- 10^pmin(
-    pmax(
-      as.matrix(
-        mdn_output$log10_sigma[
-          index,
-          1:mdn_components,
-          1:n_dim
-        ]
-      ),
-      -5
-    ),
-    5
-  )
+    for (b in seq_len(B)) {
+      rows <- seq((b - 1L) * n_samples + 1L, b * n_samples)
+      comp[rows] <- sample.int(
+        mdn_components,
+        size = n_samples,
+        replace = TRUE,
+        prob = weights[b, ]
+      )
+    }
 
-  comp <- sample(
-    1:mdn_components,
-    n_samples,
-    replace = TRUE,
-    prob = weights
-  )
+    theta <- matrix(NA_real_, B * n_samples, D)
 
-  samples <- matrix(
-    NA_real_,
-    n_samples,
-    n_dim
-  )
+    for (k in seq_len(mdn_components)) {
 
-  for(k in 1:mdn_components){
+      idx <- which(comp == k)
 
-    idx <- which(comp == k)
+      if (length(idx) == 0L)
+        next
 
-    if(length(idx) == 0)
-      next
+      b <- ((idx - 1L) %/% n_samples) + 1L
 
-    samples[idx,] <- matrix(
-      rnorm(
-        length(idx) * n_dim,
-        mean = rep(mu[k,], each = length(idx)),
-        sd = rep(sigma[k,], each = length(idx))
-      ),
-      ncol = n_dim
+      z <- matrix(rnorm(length(idx) * D), nrow = length(idx), ncol = D)
+
+      theta[idx, ] <-
+        mu_comp[[k]][b, , drop = FALSE] +
+        sigma_comp[[k]][b, , drop = FALSE] * z
+    }
+
+    if (unscale) {
+      # probotScaleBackward() aligns stats by column; plain vector
+      # arithmetic would recycle down the flattened matrix.
+      theta <- probotScaleBackward(theta, col_means, col_sds)
+    }
+
+    # Flat (B*n_samples, D) -> (n_samples, D, B) for this chunk. Filling an
+    # (n_samples, B, D) array reproduces the column-major row order of theta,
+    # so the aperm afterwards is a pure relabeling of axes.
+    out[, , start:end] <- aperm(
+      array(theta, dim = c(n_samples, B, D)), c(1, 3, 2)
+    )
+
+    if (verbose && (chunk_i %% progress_every == 0L || chunk_i == n_chunks)) {
+      cat(sprintf(
+        "probotSamplePostMDN: chunk %d/%d (obs %d-%d)\n",
+        chunk_i, n_chunks, start, end
+      ))
+    }
+  }
+
+  # ------------------------------------------------------------------
+  # Single-observation mode: return a plain (n_samples, D) matrix
+  # ------------------------------------------------------------------
+
+  if (N_obs == 1L) {
+    # Explicit matrix(): out[, , 1] would drop to a vector when output_dim == 1.
+    samples <- matrix(out[, , 1], nrow = n_samples, ncol = output_dim)
+    colnames(samples) <- col_names
+    return(samples)
+  }
+
+  if (!is.null(col_names)) {
+    dimnames(out) <- list(
+      Sample = seq_len(n_samples),
+      Parameter = col_names,
+      Observation = seq_len(N_obs)
     )
   }
 
-  # ----------------------------------
-  # Undo standardization
-  # ----------------------------------
-
-  samples <- probotScaleBackward(samples, col_means, col_sds)
-
-  colnames(samples) <- col_names
-
-  return(samples)
+  return(out)
 }
 
 probotMarginalPostMDN = function(mdn_output,
