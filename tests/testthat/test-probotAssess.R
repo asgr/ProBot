@@ -2,7 +2,7 @@ library(testthat)
 library(ProBot)
 library(torch)
 
-# --- Build a tiny MDN output for assessment tests ---
+# --- Build a tiny MDN for assessment tests ---
 setup_assess <- function(n_test = 5, output_dim = 2, K = 3, n_samples = 100) {
   set.seed(42)
   input_dim <- 3
@@ -11,7 +11,6 @@ setup_assess <- function(n_test = 5, output_dim = 2, K = 3, n_samples = 100) {
   mdl$eval()
 
   inp <- matrix(rnorm(n_test * input_dim), n_test, input_dim)
-  out <- probotPredictMDN(inp, mdl, K)
 
   col_means <- rep(0, output_dim)
   col_sds <- rep(1, output_dim)
@@ -20,14 +19,15 @@ setup_assess <- function(n_test = 5, output_dim = 2, K = 3, n_samples = 100) {
   # True params: just use random values as a reference
   params <- matrix(rnorm(n_test * output_dim), n_test, output_dim)
 
-  list(out = out, params = params, col_means = col_means,
-       col_sds = col_sds, col_names = col_names, n_samples = n_samples,
-       n_test = n_test, output_dim = output_dim)
+  list(inp = inp, mdl = mdl, K = K, params = params,
+       col_means = col_means, col_sds = col_sds, col_names = col_names,
+       n_samples = n_samples, n_test = n_test, output_dim = output_dim)
 }
 
 test_that("probotPIT returns values in [0, 1]", {
   s <- setup_assess(n_test = 3, n_samples = 200)
-  pit <- probotPIT(s$out, s$params, n_test = s$n_test, n_samples = s$n_samples,
+  pit <- probotPIT(s$inp, s$mdl, s$K, s$params, n_test = s$n_test,
+                    n_samples = s$n_samples,
                     col_means = s$col_means, col_sds = s$col_sds,
                     col_names = s$col_names, verbose = FALSE)
 
@@ -37,7 +37,8 @@ test_that("probotPIT returns values in [0, 1]", {
 
 test_that("probotPIT sets column names", {
   s <- setup_assess(n_test = 2, n_samples = 100)
-  pit <- probotPIT(s$out, s$params, n_test = s$n_test, n_samples = s$n_samples,
+  pit <- probotPIT(s$inp, s$mdl, s$K, s$params, n_test = s$n_test,
+                    n_samples = s$n_samples,
                     col_means = s$col_means, col_sds = s$col_sds,
                     col_names = s$col_names, verbose = FALSE)
 
@@ -46,7 +47,8 @@ test_that("probotPIT sets column names", {
 
 test_that("probotPIT auto-sets n_test from params", {
   s <- setup_assess(n_test = 3, n_samples = 100)
-  pit <- probotPIT(s$out, s$params, n_test = NULL, n_samples = s$n_samples,
+  pit <- probotPIT(s$inp, s$mdl, s$K, s$params, n_test = NULL,
+                    n_samples = s$n_samples,
                     col_means = s$col_means, col_sds = s$col_sds,
                     verbose = FALSE)
 
@@ -55,7 +57,8 @@ test_that("probotPIT auto-sets n_test from params", {
 
 test_that("probotTARP returns values in [0, 1]", {
   s <- setup_assess(n_test = 3, n_samples = 200)
-  tarp <- probotTARP(s$out, s$params, n_test = s$n_test, n_samples = s$n_samples,
+  tarp <- probotTARP(s$inp, s$mdl, s$K, s$params, n_test = s$n_test,
+                      n_samples = s$n_samples,
                       col_means = s$col_means, col_sds = s$col_sds,
                       col_names = s$col_names, verbose = FALSE)
 
@@ -65,7 +68,8 @@ test_that("probotTARP returns values in [0, 1]", {
 
 test_that("probotTARP caps n_test to nrow(params)", {
   s <- setup_assess(n_test = 3, n_samples = 100)
-  tarp <- probotTARP(s$out, s$params, n_test = 100, n_samples = s$n_samples,
+  tarp <- probotTARP(s$inp, s$mdl, s$K, s$params, n_test = 100,
+                      n_samples = s$n_samples,
                       col_means = s$col_means, col_sds = s$col_sds,
                       verbose = FALSE)
 
@@ -77,7 +81,7 @@ test_that("probotTARP defaults to all rows (n_test = NULL)", {
   # params matrix still returned 1e4 TARP values. The NULL default must use
   # every row.
   s <- setup_assess(n_test = 200, n_samples = 20)
-  tarp <- probotTARP(s$out, s$params, n_samples = s$n_samples,
+  tarp <- probotTARP(s$inp, s$mdl, s$K, s$params, n_samples = s$n_samples,
                       col_means = s$col_means, col_sds = s$col_sds,
                       verbose = FALSE)
 
@@ -88,25 +92,60 @@ test_that("probotPIT/probotTARP/probotCRPS handle n_test = 0 without crashing", 
   # 1:0 evaluates to c(1, 0) and the loop iterated i = 0 -> subscript error.
   s <- setup_assess(n_test = 3, n_samples = 100)
 
-  pit <- probotPIT(s$out, s$params, n_test = 0, n_samples = s$n_samples,
+  pit <- probotPIT(s$inp, s$mdl, s$K, s$params, n_test = 0,
+                    n_samples = s$n_samples,
                     col_means = s$col_means, col_sds = s$col_sds,
                     verbose = FALSE)
   expect_equal(dim(pit), c(0L, s$output_dim))
 
-  tarp <- probotTARP(s$out, s$params, n_test = 0, n_samples = s$n_samples,
+  tarp <- probotTARP(s$inp, s$mdl, s$K, s$params, n_test = 0,
+                      n_samples = s$n_samples,
                       col_means = s$col_means, col_sds = s$col_sds,
                       verbose = FALSE)
   expect_equal(length(tarp), 0)
 
-  crps <- probotCRPS(s$out, s$params, n_test = 0, n_samples = s$n_samples,
+  crps <- probotCRPS(s$inp, s$mdl, s$K, s$params, n_test = 0,
+                      n_samples = s$n_samples,
                       col_means = s$col_means, col_sds = s$col_sds,
                       verbose = FALSE)
   expect_equal(dim(crps), c(0L, s$output_dim))
 })
 
+test_that("assess functions accept a single observation as a vector", {
+  # as.matrix() orients a bare vector as a column, which silently transposes
+  # the conditioning input; a vector must be read as one row.
+  s <- setup_assess(n_test = 1, n_samples = 200)
+
+  pit_v <- probotPIT(s$inp[1, ], s$mdl, s$K, s$params[1, , drop = FALSE],
+                      n_samples = s$n_samples, col_means = s$col_means,
+                      col_sds = s$col_sds, verbose = FALSE)
+  expect_equal(dim(pit_v), c(1L, s$output_dim))
+
+  crps_v <- probotCRPS(s$inp[1, ], s$mdl, s$K, s$params[1, , drop = FALSE],
+                        n_samples = s$n_samples, col_means = s$col_means,
+                        col_sds = s$col_sds, verbose = FALSE)
+  expect_equal(dim(crps_v), c(1L, s$output_dim))
+
+  tarp_v <- probotTARP(s$inp[1, ], s$mdl, s$K, s$params[1, , drop = FALSE],
+                        n_samples = s$n_samples, col_means = s$col_means,
+                        col_sds = s$col_sds, verbose = FALSE)
+  expect_length(tarp_v, 1L)
+  expect_true(tarp_v >= 0 & tarp_v <= 1)
+})
+
+test_that("assess functions reject input with too few rows", {
+  s <- setup_assess(n_test = 3, n_samples = 50)
+  expect_error(
+    probotPIT(s$inp[1:2, ], s$mdl, s$K, s$params, n_samples = s$n_samples,
+              col_means = s$col_means, col_sds = s$col_sds, verbose = FALSE),
+    "at least n_test rows"
+  )
+})
+
 test_that("probotCRPS returns non-negative values", {
   s <- setup_assess(n_test = 3, n_samples = 200)
-  crps <- probotCRPS(s$out, s$params, n_test = s$n_test, n_samples = s$n_samples,
+  crps <- probotCRPS(s$inp, s$mdl, s$K, s$params, n_test = s$n_test,
+                      n_samples = s$n_samples,
                       col_means = s$col_means, col_sds = s$col_sds,
                       col_names = s$col_names, verbose = FALSE)
 
@@ -116,7 +155,8 @@ test_that("probotCRPS returns non-negative values", {
 
 test_that("probotCRPS sets column names", {
   s <- setup_assess(n_test = 2, n_samples = 100)
-  crps <- probotCRPS(s$out, s$params, n_test = s$n_test, n_samples = s$n_samples,
+  crps <- probotCRPS(s$inp, s$mdl, s$K, s$params, n_test = s$n_test,
+                      n_samples = s$n_samples,
                       col_means = s$col_means, col_sds = s$col_sds,
                       col_names = s$col_names, verbose = FALSE)
 
@@ -174,13 +214,17 @@ test_that("probotCRPS matches the brute-force double-sum estimator", {
   # exercises the weight formula through the real probotCRPS() +
   # probotSamplePostMDN() path; the previous halved weights would be off by
   # 1/(2*sqrt(pi)) ~ 0.28 (>> MC noise).
-  o_det <- list(
-    mu = torch_tensor(array(10, c(3, 1, 1))),
-    log10_sigma = torch_tensor(array(0, c(3, 1, 1))),
-    logits = torch_tensor(matrix(0, 3, 1))
-  )
+  # Stub module: constant (mu, log10_sigma, logit) head, whatever the input.
+  o_det <- nn_module(
+    initialize = function() {
+      self$out <- torch_tensor(cbind(10, 0, 0))
+    },
+    forward = function(x) self$out$expand(c(x$size(1), -1))
+  )()
+
   truth <- c(10, 10.3, 15)
-  crps_det <- probotCRPS(o_det, matrix(truth, 3, 1), n_samples = 1e4,
+  crps_det <- probotCRPS(matrix(rnorm(3), 3, 1), o_det, mdn_components = 1,
+                         params = matrix(truth, 3, 1), n_samples = 1e4,
                          col_means = 0, col_sds = 1, verbose = FALSE)
 
   Eabs <- function(t, mu) 2 * dnorm(t - mu) + (t - mu) * (2 * pnorm(t - mu) - 1)

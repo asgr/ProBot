@@ -76,7 +76,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   as.numeric(loss_mdn$item())
 
   ## Flow loss
-  model_nf <- probotMakeFlow(dim_theta = 2, dim_x = 3, n_layers = 2, device = "cpu")()
+  model_nf <- probotMakeFlow(input_dim = 3, output_dim = 2, n_layers = 2, device = "cpu")()
   theta <- torch::torch_randn(c(4, 2), device = "cpu")
   ctx <- torch::torch_randn(c(4, 3), device = "cpu")
 

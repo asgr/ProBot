@@ -22,8 +22,8 @@ eval_global <- FALSE
 **ProBot** supports two complementary approaches to simulation-based inference (SBI).
 The *Back and Forth* vignette covers the classic **Mixture Density Network** (MDN)
 workflow. This vignette introduces the second approach: **Normalising Flows** (NFs),
-specifically a conditional Real-valued Non-Volume Preserving (RealNVP) architecture
-built from affine coupling layers.
+specifically a conditional Real Non-Volume Preserving (RealNVP) architecture
+built from stacked RealNVP (affine coupling) layers.
 
 ### What is a Normalising Flow?
 
@@ -45,12 +45,12 @@ density rather than a finite Gaussian mixture: the flow can represent arbitraril
 complex, multi-modal posteriors without fixing the number of components in advance.
 Sampling is fast: draw `z ~ N(0, I)` and apply the inverse transformation.
 
-### The coupling-layer architecture
+### The RealNVP-layer architecture
 
-**ProBot**'s coupling flow (`probotMakeFlow(style = "couple")`, also available
-directly as `probotFlowCouple`) stacks multiple coupling layers
-(`.probotCouplingLayer`, a private module).
-Each coupling layer:
+**ProBot**'s RealNVP flow (`probotMakeFlow(style = "realnvp")`, also available
+directly as `probotFlowRealNVP`) stacks multiple RealNVP layers
+(`.probotRealNVPLayer`, a private module).
+Each RealNVP layer:
 
 1. Splits the parameter vector `θ` into two halves, `θ₁` and `θ₂`.
 2. Uses a small network that takes `(θ₁, x)` as input to predict an affine shift `t`
@@ -141,15 +141,15 @@ flow_dataloader <- probotDataLoader(
 
 `probotMakeFlow` accepts three key hyperparameters:
 
-- `dim_theta` — dimensionality of the parameter space (2 for `u` and `v`).
-- `dim_x` — dimensionality of the conditioning context (9 polynomial values).
-- `n_layers` — number of coupling layers; more layers increase expressiveness.
-- `hidden_dim` — width of the shift/scale network inside each coupling layer.
+- `input_dim` — dimensionality of the conditioning context (9 polynomial values).
+- `output_dim` — dimensionality of the parameter space (2 for `u` and `v`).
+- `n_layers` — number of RealNVP layers; more layers increase expressiveness.
+- `hidden_dim` — width of the shift/scale network inside each RealNVP layer.
 
 ```{r build-flow, eval = eval_global}
 flow_model <- probotMakeFlow(
-  dim_theta  = ncol(theta_train),
-  dim_x      = ncol(poly_train$output),
+  input_dim     = ncol(poly_train$output),
+  output_dim    = ncol(theta_train),
   n_layers   = 6,
   hidden_dim = 64
 )()
@@ -422,8 +422,8 @@ MDNs are often preferable when:
 
 | Function | Role |
 |---|---|
-| `probotFlowCouple()` | Stacked coupling-layer flow: forward (θ → z) and inverse (z → θ) |
-| `probotFlowAutoReg()` | Stacked masked-autoregressive block flow (alternative architecture) |
+| `probotFlowRealNVP()` | Stacked RealNVP-layer flow: forward (θ → z) and inverse (z → θ) |
+| `probotFlowMAF()` | Masked Autoregressive Flows (MAF) architecture |
 | `probotMakeFlow()` | Facade that dispatches to either of the above via `style` |
 | `probotLossNF()` | Negative log-likelihood loss for flow training |
 | `probotSamplePostNF()` | Draw posterior samples via the inverse flow |

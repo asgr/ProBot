@@ -2,7 +2,7 @@
 .probotRequired <- list(
   mdn   = c("mdn_components", "input_dim", "output_dim"),
   point = c("input_dim", "output_dim"),
-  flow  = c("dim_theta", "dim_x")
+  flow  = c("input_dim", "output_dim")
 )
 
 probotSave <- function(
@@ -13,8 +13,6 @@ probotSave <- function(
     mdn_components = NULL,
     input_dim = NULL,
     output_dim = NULL,
-    dim_theta = NULL,
-    dim_x = NULL,
     n_layers = NULL,
     hidden_dim = NULL,
     hidden_dims = NULL,
@@ -39,15 +37,15 @@ probotSave <- function(
   # model's class when not given explicitly.
   if (model_type == "flow") {
     if (is.null(flow_style)) {
-      flow_style <- if (any(grepl("AutoReg", class(model)))) {
-        "autoreg"
+      flow_style <- if (any(grepl("MAF", class(model)))) {
+        "maf"
       } else if (any(grepl("NSF", class(model)))) {
         "nsf"
       } else {
-        "couple"
+        "realnvp"
       }
     } else {
-      flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
+      flow_style <- match.arg(tolower(flow_style), c("realnvp", "maf", "nsf"))
     }
   } else {
     flow_style <- NULL
@@ -58,7 +56,7 @@ probotSave <- function(
   meta_values <- switch(model_type,
     mdn   = list(mdn_components, input_dim, output_dim),
     point = list(input_dim, output_dim),
-    flow  = list(dim_theta, dim_x)
+    flow  = list(input_dim, output_dim)
   )
 
   missing <- required[vapply(meta_values, is.null, logical(1))]
@@ -80,8 +78,6 @@ probotSave <- function(
       mdn_components  = mdn_components,
       input_dim       = input_dim,
       output_dim      = output_dim,
-      dim_theta       = dim_theta,
-      dim_x           = dim_x,
       n_layers        = n_layers,
       hidden_dim      = hidden_dim,
       hidden_dims     = hidden_dims,
@@ -175,7 +171,28 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
   # saved in metadata. It is the escape hatch for loading older flow
   # checkpoints saved before flow_style was recorded in the metadata block.
   if (!is.null(flow_style)) {
-    flow_style <- match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
+    flow_style <- match.arg(tolower(flow_style), c("realnvp", "maf", "nsf",
+                                                   "couple", "autoreg"))
+    flow_style <- switch(flow_style,
+      couple   = "realnvp",
+      autoreg  = "maf",
+      flow_style
+    )
+  }
+
+  # For flow checkpoints saved before the dim_theta/dim_x -> input_dim/output_dim
+  # rename, normalise legacy metadata keys so reconstruction still works.
+  if (model_type == "flow") {
+    if (is.null(meta$input_dim)  && !is.null(meta$dim_x))     meta$input_dim  <- meta$dim_x
+    if (is.null(meta$output_dim) && !is.null(meta$dim_theta))  meta$output_dim <- meta$dim_theta
+    # Normalise legacy flow_style values saved before the rename.
+    if (!is.null(meta$flow_style)) {
+      meta$flow_style <- switch(meta$flow_style,
+        couple  = "realnvp",
+        autoreg = "maf",
+        meta$flow_style
+      )
+    }
   }
 
   required <- .probotRequired[[model_type]]
@@ -225,18 +242,22 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
       device      = device
     )(),
     flow = probotMakeFlow(
-      dim_theta   = meta$dim_theta,
-      dim_x       = meta$dim_x,
+      input_dim   = meta$input_dim,
+      output_dim  = meta$output_dim,
       n_layers    = if (!is.null(meta$n_layers)) meta$n_layers else 4,
       hidden_dim  = if (!is.null(meta$hidden_dim)) meta$hidden_dim else 32,
-      n_blocks  = if (!is.null(meta$n_blocks)) meta$n_blocks else 5,
+      # Pass n_blocks through untouched (NULL when absent) so probotMakeFlow()
+      # can map the saved n_layers onto it for style = "maf". Substituting a
+      # non-NULL default here would win over n_layers and reconstruct a flow
+      # with the wrong depth, failing the state_dict load.
+      n_blocks  = meta$n_blocks,
       n_layers_per_block = if (!is.null(meta$n_layers_per_block)) meta$n_layers_per_block else 2,
       n_bins = if (!is.null(meta$n_bins)) meta$n_bins else 8,
       tail_bound = if (!is.null(meta$tail_bound)) meta$tail_bound else 3,
       soft_clamp  = if (!is.null(meta$soft_clamp)) meta$soft_clamp else 3,
-      # Priority: explicit override > saved metadata > "couple" (legacy default).
+      # Priority: explicit override > saved metadata > "realnvp" (legacy default).
       style       = if (!is.null(flow_style)) flow_style else
-                    if (!is.null(meta$flow_style)) meta$flow_style else "couple",
+                    if (!is.null(meta$flow_style)) meta$flow_style else "realnvp",
       device      = device
     )()
   )

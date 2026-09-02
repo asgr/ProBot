@@ -18,8 +18,6 @@ probotSave(
   mdn_components = NULL,
   input_dim = NULL,
   output_dim = NULL,
-  dim_theta = NULL,
-  dim_x = NULL,
   n_layers = NULL,
   hidden_dim = NULL,
   hidden_dims = NULL,
@@ -66,22 +64,18 @@ probotLoad(
     \item{mdn_components}{Number of MDN mixture components. Required for
     \code{model_type = "mdn"}.}
 
-    \item{input_dim}{Dimension of the input layer. Required for Flow, MDN and Point models.}
+    \item{input_dim}{Dimensionality of the input (conditioning) features.
+    Required for Flow, MDN and Point models.}
 
-    \item{output_dim}{Dimension of the output layer. Required for Flow, MDN and Point models.}
+    \item{output_dim}{Dimensionality of the output (parameter) space.
+    Required for Flow, MDN and Point models.}
 
-    \item{dim_theta}{Dimensionality of the parameter space. Required for
-    \code{model_type = "flow"}.}
-
-    \item{dim_x}{Dimensionality of the conditioning context. Required for
-    \code{model_type = "flow"}.}
-
-    \item{n_layers}{Number of coupling layers. Used for Flow model
+    \item{n_layers}{Number of RealNVP layers. Used for Flow model
     reconstruction (defaults to 4 if not saved).}
 
-    \item{hidden_dim}{Width of the shift/scale network inside each coupling layer.
+    \item{hidden_dim}{Width of the shift/scale network inside each RealNVP layer.
     Used for Flow model reconstruction (defaults to 32 if not saved).}
-    \item{n_blocks}{Number of autoregressive blocks for \code{style = "autoreg"}.}
+    \item{n_blocks}{Number of MAF (masked autoregressive) blocks for \code{style = "maf"}.}
     \item{n_layers_per_block}{Number of masked layers per autoregressive block.}
     \item{n_bins}{Number of rational-quadratic spline bins for
     \code{style = "nsf"} (defaults to 8 if not saved).}
@@ -101,14 +95,14 @@ probotLoad(
     not saved).}
 
     \item{flow_style}{Which flow architecture the checkpoint holds:
-    \code{"couple"} (stacked coupling layers, the default), \code{"autoreg"}
+    \code{"realnvp"} (stacked Real Non-Volume Preserving (RealNVP) layers, the default), \code{"maf"}
     (masked autoregressive blocks with permutation layers), or \code{"nsf"}
     (rational-quadratic spline coupling layers). Only meaningful
     for \code{model_type = "flow"}. For \code{probotSave()} it is written into
     the metadata; if \code{NULL}, it is inferred from the model's class
-    (\code{probotFlowAutoReg} instances yield \code{"autoreg"},
+    (\code{probotFlowMAF} instances yield \code{"maf"},
     \code{probotFlowNSF} instances yield \code{"nsf"}, and other flows yield
-    \code{"couple"}). For \code{probotLoad()} it acts as an override that
+    \code{"realnvp"}). For \code{probotLoad()} it acts as an override that
     takes precedence over the saved value; useful for loading older flow
     checkpoints saved before \code{flow_style} was recorded.}
 
@@ -140,7 +134,7 @@ metadata fields are required for auto-reconstruction:
 \describe{
   \item{\code{"mdn"}}{requires \code{mdn_components}, \code{input_dim}, \code{output_dim}}
   \item{\code{"point"}}{requires \code{input_dim}, \code{output_dim}}
-  \item{\code{"flow"}}{requires \code{dim_theta}, \code{dim_x}}
+  \item{\code{"flow"}}{requires \code{input_dim}, \code{output_dim}}
 }
 
 When required metadata is missing, \code{probotSave()} issues a warning that
@@ -157,7 +151,7 @@ checkpoint to decide which constructor to call. Old checkpoints that lack
 \code{model_type} default to \code{"mdn"} for backward compatibility.
 
 For \code{model_type = "flow"}, the checkpoint's \code{flow_style} metadata
-field selects the architecture (defaults to \code{"couple"} if the field is
+field selects the architecture (defaults to \code{"realnvp"} if the field is
 absent, as in checkpoints saved before this field existed). A \code{probotSave()}
 call records \code{flow_style} automatically; the \code{flow_style} argument
 to \code{probotLoad()} overrides the saved value.
@@ -210,15 +204,15 @@ probotSave(
   flow_model,
   filename = "my_flow.pt",
   model_type = "flow",
-  dim_theta = 4,
-  dim_x = 3,
+  input_dim = 3,
+  output_dim = 4,
   n_layers = 6,
   hidden_dim = 64
 )
 
 loaded_flow <- probotLoad("my_flow.pt")
 
-## Older autoreg checkpoint saved before flow_style was recorded:
-loaded_autoreg <- probotLoad("my_autoreg.pt", flow_style = "autoreg")
+## Older MAF checkpoint saved before flow_style was recorded:
+loaded_maf <- probotLoad("my_maf.pt", flow_style = "maf")
 }
 }

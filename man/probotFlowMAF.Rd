@@ -1,19 +1,19 @@
-\name{probotFlowAutoReg}
-\alias{probotFlowAutoReg}
-\title{Construct an Autoregressive (MAF) Normalizing Flow}
+\name{probotFlowMAF}
+\alias{probotFlowMAF}
+\title{Construct a Masked Autoregressive Flow (MAF) Normalizing Flow}
 \description{
 Construct an \code{\link[torch]{nn_module}} implementing a conditional
-normalizing flow built from masked autoregressive (MAF) blocks separated
-by permutation layers. This is the \code{style = "autoreg"} architecture of
+normalizing flow from the Masked Autoregressive Flows (MAF) family, built from blocks separated
+by permutation layers. This is the \code{style = "maf"} architecture of
 \code{\link{probotMakeFlow}}. Each block lets every parameter's affine
 transformation depend on all parameters ordered before it, so the flow
 factorises the full joint density as a product of conditional
 distributions.
 }
 \usage{
-probotFlowAutoReg(
-  dim_theta,
-  dim_x,
+probotFlowMAF(
+  input_dim,
+  output_dim,
   n_blocks = 5,
   n_layers_per_block = 2,
   hidden_dim = 500,
@@ -22,10 +22,10 @@ probotFlowAutoReg(
 )
 }
 \arguments{
-    \item{dim_theta}{Total dimensionality of the parameter space.}
-
-    \item{dim_x}{Dimensionality of the context/input features used to
+    \item{input_dim}{Dimensionality of the context/input features used to
     condition the flow.}
+
+    \item{output_dim}{Total dimensionality of the parameter space.}
 
     \item{n_blocks}{Number of masked autoregressive blocks to stack.
     Defaults to 5.}
@@ -46,7 +46,7 @@ probotFlowAutoReg(
 }
 \details{
 The returned module exposes the same interface as
-\code{\link{probotFlowCouple}}: \code{forward(theta, x)} returns a list
+\code{\link{probotFlowRealNVP}}: \code{forward(theta, x)} returns a list
 with \code{z} and \code{log_det_jac}, and \code{inverse(z, x)} maps a base
 draw \eqn{z \sim N(0, I)} back to parameter space.
 
@@ -65,10 +65,10 @@ Inside, each block is a masked autoregressive flow:
 The inverse pass reconstructs \eqn{\theta} coordinate by coordinate: because
 of the autoregressive mask, the transformation for coordinate \eqn{j} is
 known as soon as coordinates \eqn{1, \dots, j-1} are reconstructed, so
-sampling is exact. Unlike the coupling architecture, this reconstruction is
-\emph{sequential} in \code{dim_theta} and calls the masked MLP
-\code{dim_theta} times per block, which is the main reason autoregressive
-sampling is slower than coupling sampling (see
+sampling is exact. Unlike the RealNVP architecture, this reconstruction is
+\emph{sequential} in \code{output_dim} and calls the masked MLP
+\code{output_dim} times per block, which is the main reason autoregressive
+sampling is slower than RealNVP sampling (see
 \code{\link{probotMakeFlow}} for a comparison).
 }
 \value{
@@ -78,7 +78,7 @@ An instantiated \code{\link[torch]{nn_module}}.
 Aaron Robotham
 }
 \seealso{
-\code{\link{probotMakeFlow}}, \code{\link{probotFlowCouple}},
+\code{\link{probotMakeFlow}}, \code{\link{probotFlowRealNVP}},
 \code{\link{probotLossNF}}, \code{\link{probotTrainFlow}},
 \code{\link{probotSamplePostNF}}
 }
@@ -86,7 +86,7 @@ Aaron Robotham
 if (requireNamespace("torch", quietly = TRUE)) {
 ## Build an autoregressive flow for 3 parameters conditioned on 2 features.
 ## The call returns an instantiated module (no extra parentheses needed).
-flow <- probotFlowAutoReg(dim_theta = 3, dim_x = 2, device = "cpu")
+flow <- probotFlowMAF(input_dim = 2, output_dim = 3, device = "cpu")
 
 theta <- torch::torch_randn(c(10, 3))
 x <- torch::torch_randn(c(10, 2))

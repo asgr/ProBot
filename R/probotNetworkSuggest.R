@@ -8,13 +8,13 @@ probotNetworkSuggest = function(input_dim,
                                  output_dim,
                                  n_train = NULL,
                                  type = "MDN",
-                                 flow_style = "couple",
+                                 flow_style = "realnvp",
                                  verbose = TRUE) {
   type = match.arg(toupper(type), c("FLOW", "MDN", "POINT"))
 
   # flow_style is only meaningful for type = "Flow", but validated up front so
   # an invalid value fails fast regardless of type.
-  flow_style = match.arg(tolower(flow_style), c("couple", "autoreg", "nsf"))
+  flow_style = match.arg(tolower(flow_style), c("realnvp", "maf", "nsf"))
 
   stopifnot(
     is.numeric(input_dim),
@@ -134,29 +134,29 @@ probotNetworkSuggest = function(input_dim,
                    },
 
                    FLOW = {
-                     # Coupling and autoregressive flows have different capacity
-                     # economics (see vignettes/probot-coupling-or-autoreg.Rmd):
-                     #   - Coupling transforms only half the dims per layer, so it
+                     # RealNVP and MAF flows have different capacity
+                     # economics (see vignettes/probot-realnvp-or-maf.Rmd):
+                     #   - RealNVP transforms only half the dims per layer, so it
                      #     NEEDS depth to mix every dimension, but its inverse pass
                      #     (sampling) is a single vectorised sweep whose cost is flat
-                     #     in dim_theta. => spend on n_layers, keep hidden modest.
-                     #   - AutoReg conditions each dim on its full prefix within a
+                     #     in output_dim. => spend on n_layers, keep hidden modest.
+                     #   - MAF conditions each dim on its full prefix within a
                      #     single block, so depth buys less, but each block multiplies
-                     #     the sequential inverse cost by dim_theta. => keep blocks
+                     #     the sequential inverse cost by output_dim. => keep blocks
                      #     low, put capacity into conditioner width instead.
-                     if (flow_style == "couple") {
-                       # Depth scales with dim_theta: >= ~2 layers needed per full
+                     if (flow_style == "realnvp") {
+                       # Depth scales with output_dim: >= ~2 layers needed per full
                        # pass over the parameter space, capped generously because
-                       # deeper coupling is cheap at sample time.
+                       # deeper RealNVP is cheap at sample time.
                        n_layers = pmax(4L, pmin(24L, 4L + output_dim))
                        if (!is.null(n_train)) {
                          n_layers = n_layers * pmin(2, log10(n_train) / 4)
                        }
                        n_layers = pmax(4L, pmin(24L, as.integer(round(n_layers))))
                        hidden_dim = pmax(32L, pmin(512L, n_ref))
-                     } else if (flow_style == "autoreg") {
+                     } else if (flow_style == "maf") {
                        # Fewer blocks (prefix conditioning is built in); scaled
-                       # conservatively since each block is dim_theta sequential
+                       # conservatively since each block is output_dim sequential
                        # masked passes when sampling.
                        n_layers = pmax(3L, pmin(10L, 3L + ceiling(output_dim / 4)))
                        if (!is.null(n_train)) {
@@ -167,7 +167,7 @@ probotNetworkSuggest = function(input_dim,
                        hidden_dim = pmax(64L, pmin(512L, .round_to_nice(1.5 * n_ref)))
                       } else {
                        # Rational-quadratic spline coupling is more expressive
-                       # than affine coupling while retaining parallel sampling.
+                       # than affine RealNVP while retaining parallel sampling.
                        n_layers = pmax(4L, pmin(12L, 4L + ceiling(output_dim / 2)))
                        if (!is.null(n_train)) {
                          n_layers = n_layers * pmin(1.5, log10(n_train) / 5)
@@ -180,16 +180,16 @@ probotNetworkSuggest = function(input_dim,
                      # weights + biases). MaskedLinear masks weights at run time but
                      # still registers the full nn_linear parameter tensor, so MADE
                      # blocks are counted like dense layers.
-                     if (flow_style == "couple") {
+                     if (flow_style == "realnvp") {
                        d1 = floor(output_dim / 2)
                        d2 = output_dim - d1
-                       # shift_scale_net per layer: (d1 + dim_x) -> h -> h -> 2*d2
+                       # shift_scale_net per layer: (d1 + input_dim) -> h -> h -> 2*d2
                        per_layer = (d1 + input_dim + 1) * hidden_dim +
                          (hidden_dim + 1) * hidden_dim +
                          (hidden_dim + 1) * (2 * d2)
                        n_params = as.numeric(n_layers) * per_layer
-                     } else if (flow_style == "autoreg") {
-                       # Each autoreg block: masked MLP (d_theta + dim_x) -> h -> h -> 2*d_theta
+                     } else if (flow_style == "maf") {
+                       # Each MAF block: masked MLP (output_dim + input_dim) -> h -> h -> 2*output_dim
                        # (n_layers_per_block is fixed at 2 by probotMakeFlow());
                        # permutation layers are parameter-free.
                        per_block = (output_dim + input_dim + 1) * hidden_dim +
@@ -200,7 +200,7 @@ probotNetworkSuggest = function(input_dim,
                        d1 = floor(output_dim / 2)
                        d2 = output_dim - d1
                        n_bins = 8L
-                       # Spline conditioner: (d1 + dim_x) -> h -> h -> d2*(3K-1).
+                       # Spline conditioner: (d1 + input_dim) -> h -> h -> d2*(3K-1).
                        per_layer = (d1 + input_dim + 1) * hidden_dim +
                          (hidden_dim + 1) * hidden_dim +
                          (hidden_dim + 1) * (d2 * (3 * n_bins - 1))
@@ -208,8 +208,8 @@ probotNetworkSuggest = function(input_dim,
                      }
 
                      suggestion = c(list(
-                       dim_x      = input_dim,
-                       dim_theta  = output_dim,
+                       input_dim  = input_dim,
+                       output_dim = output_dim,
                        n_layers   = n_layers,
                        hidden_dim = hidden_dim,
                        style      = flow_style
@@ -219,15 +219,15 @@ probotNetworkSuggest = function(input_dim,
                      if (verbose) {
                        .suggest_print(
                          switch(flow_style,
-                                couple = "Flow (coupling)",
-                                autoreg = "Flow (autoreg)",
+                                realnvp = "Flow (RealNVP)",
+                                maf = "Flow (MAF)",
                                 nsf = "Flow (Neural Spline)"),
                          input_dim,
                          output_dim,
                          n_train,
                          sprintf("style      : %s", flow_style),
                          sprintf("n_layers   : %d%s", n_layers,
-                                 if (flow_style == "autoreg") "  (autoregressive blocks)" else ""),
+                                 if (flow_style == "maf") "  (masked autoregressive blocks)" else ""),
                          sprintf("hidden_dim : %d", hidden_dim),
                          .suggest_params_line(n_params)
                        )

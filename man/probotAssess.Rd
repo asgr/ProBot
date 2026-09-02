@@ -12,49 +12,63 @@ Random Points coverage values.
 }
 \usage{
 probotCRPS(
-  mdn_output,
+  input,
+  model,
+  mdn_components,
   params,
   n_test = NULL,
   n_samples = 1e4,
   col_means,
   col_sds,
   col_names = NULL,
+  batch_size = NULL,
   verbose = TRUE
 )
 
 probotPIT(
-  mdn_output,
+  input,
+  model,
+  mdn_components,
   params,
   n_test = NULL,
   n_samples = 1e4,
   col_means,
   col_sds,
   col_names = NULL,
+  batch_size = NULL,
   verbose = TRUE
 )
 
 probotTARP(
-  mdn_output,
+  input,
+  model,
+  mdn_components,
   params,
   n_test = NULL,
   n_samples = 1e4,
   col_means,
   col_sds,
   col_names = NULL,
+  batch_size = NULL,
   verbose = TRUE
 )
 }
 \arguments{
-  \item{mdn_output}{List returned by \code{\link{probotPredictMDN}()}, containing
-    \code{logits}, \code{mu}, and \code{log10_sigma} tensors.}
+  \item{input}{Numeric matrix of conditioning inputs, with one row per test
+    observation and the same columns used to train \code{model}. Rows beyond
+    \code{n_test} are ignored, so it is not necessary to subset beforehand.}
+
+  \item{model}{An instantiated MDN \code{\link[torch]{nn_module}} object (e.g., from
+    \code{\link{probotMakeMDN}}).}
+
+  \item{mdn_components}{Number of mixture components used when \code{model} was trained.}
 
   \item{params}{Numeric matrix of shape \eqn{n_\text{test} \times n_\text{params}}
     containing the true parameter values for each test observation.}
 
-  \item{n_test}{Number of values to compute. For \code{probotCRPS()} and
-    \code{probotPIT()}, defaults to \code{NULL} (all rows). For
-    \code{probotTARP()}, defaults to \code{1e4}. In all cases, cannot exceed
-    \code{nrow(params)}.}
+  \item{n_test}{Number of values to compute (i.e. the first \code{n_test} rows
+    of \code{params}). Defaults to \code{NULL} (all \code{nrow(params)} rows)
+    for all three functions; otherwise capped at \code{nrow(params)}.}
 
   \item{n_samples}{Number of posterior samples to draw per observation.
     Defaults to \code{1e4}.}
@@ -67,11 +81,15 @@ probotTARP(
 
   \item{col_names}{Optional character vector of parameter names. For
     \code{probotCRPS} and \code{probotPIT}, assigned as column names
-    of the returned matrix. For \code{probotTARP()}, passed through to
-    \code{\link{probotSamplePostMDN}().}}
+    of the returned matrix; for \code{probotTARP} it is used only for the
+    internal sample array and the returned vector is unnamed.}
 
-  \item{verbose}{Logical. If \code{TRUE} (default), prints progress to the
-    console every 1000 observations.}
+  \item{batch_size}{Number of observations sampled per chunk, passed to
+    \code{\link{probotSamplePostMDN}}. If \code{NULL} (default) the chunk size is
+    chosen automatically to bound memory.}
+
+  \item{verbose}{Logical. If \code{TRUE} (default), forwards progress reporting
+    to \code{\link{probotSamplePostMDN}}.}
 }
 \details{
   \strong{CRPS:} For each test observation \eqn{i} and parameter dimension
@@ -111,6 +129,14 @@ probotTARP(
 
   Under a well-calibrated posterior, TARP values should be uniformly
   distributed on \eqn{[0, 1]}.
+
+  All three functions draw samples for the first \code{n_test} rows of
+  \code{input} in a single batched call to \code{\link{probotSamplePostMDN}}, then
+  slice the resulting \eqn{n\_samples \times D \times n\_test}{n_samples x D x n_test}
+  array per observation. That array is allocated in full, so its size dominates the
+  memory used here (roughly 8 bytes per element); reduce \code{n_test} or
+  \code{n_samples} if it becomes restrictive. \code{batch_size} bounds only the
+  intermediate working set, not the output array.
 }
 \value{
   \code{probotCRPS()} returns a numeric matrix of shape
@@ -139,14 +165,15 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   model <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3)()
   x <- matrix(rnorm(20), ncol = 2)
-  pred <- probotPredictMDN(x, model, mdn_components = 3)
 
   # True parameter values (10 observations x 2 parameters)
   params <- matrix(rnorm(20), nrow = 10, ncol = 2)
 
   ## CRPS
   crps <- probotCRPS(
-    mdn_output = pred,
+    input = x,
+    model = model,
+    mdn_components = 3,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -158,7 +185,9 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   ## PIT
   pit <- probotPIT(
-    mdn_output = pred,
+    input = x,
+    model = model,
+    mdn_components = 3,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -170,7 +199,9 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   ## TARP
   tarp <- probotTARP(
-    mdn_output = pred,
+    input = x,
+    model = model,
+    mdn_components = 3,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),

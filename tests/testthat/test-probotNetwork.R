@@ -47,7 +47,7 @@ test_that("probotMakeFlow returns an nn_module", {
 })
 
 test_that("probotMakeFlow forward returns z and log_det_jac", {
-  mdl <- probotMakeFlow(4, 2, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
   theta <- torch_randn(4, 4)
   x <- torch_randn(4, 2)
 
@@ -58,7 +58,7 @@ test_that("probotMakeFlow forward returns z and log_det_jac", {
 })
 
 test_that("probotMakeFlow inverse returns theta of correct shape", {
-  mdl <- probotMakeFlow(4, 2, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
   z <- torch_randn(4, 4)
   x <- torch_randn(4, 2)
 
@@ -66,8 +66,8 @@ test_that("probotMakeFlow inverse returns theta of correct shape", {
   expect_equal(theta$shape, c(4L, 4L))
 })
 
-test_that(".probotCouplingLayer forward and inverse are consistent", {
-  layer <- ProBot:::.probotCouplingLayer(4, 2, hidden_dim = 8, device = "cpu")
+test_that(".probotRealNVPLayer forward and inverse are consistent", {
+  layer <- ProBot:::.probotRealNVPLayer(2, 4, hidden_dim = 8, device = "cpu")
   theta <- torch_randn(2, 4)
   x <- torch_randn(2, 2)
 
@@ -83,7 +83,7 @@ test_that(".probotCouplingLayer forward and inverse are consistent", {
 
 test_that("probotMakeFlow forward then inverse recovers input", {
   set.seed(123)
-  mdl <- probotMakeFlow(6, 3, n_layers = 3, hidden_dim = 16, device = "cpu")()
+  mdl <- probotMakeFlow(3, 6, n_layers = 3, hidden_dim = 16, device = "cpu")()
   theta <- torch_randn(2, 6)
   x <- torch_randn(2, 3)
 
@@ -99,7 +99,7 @@ test_that("probotMakeFlow forward then inverse recovers input", {
 
 test_that("Neural Spline Flow forward and inverse are consistent", {
   set.seed(123)
-  mdl <- probotMakeFlow(4, 2, n_layers = 3, hidden_dim = 16, n_bins = 8,
+  mdl <- probotMakeFlow(2, 4, n_layers = 3, hidden_dim = 16, n_bins = 8,
                         style = "nsf", device = "cpu")()
   theta <- torch_randn(3, 4)
   x <- torch_randn(3, 2)
@@ -114,7 +114,8 @@ test_that("Neural Spline Flow forward and inverse are consistent", {
 })
 
 test_that("Neural Spline Flow has identity tails", {
-  mdl <- probotMakeFlow(2, 1, n_layers = 1, hidden_dim = 8, style = "nsf",
+  # input_dim = 1 (context), output_dim = 2 (parameter space)
+  mdl <- probotMakeFlow(1, 2, n_layers = 1, hidden_dim = 8, style = "nsf",
                         device = "cpu")()
   theta <- torch_tensor(matrix(c(10, -10), nrow = 1))
   x <- torch_zeros(1, 1)
@@ -122,6 +123,44 @@ test_that("Neural Spline Flow has identity tails", {
 
   expect_equal(as.numeric(out$z), as.numeric(c(-10, 10)), tolerance = 1e-6)
   expect_equal(as.numeric(out$log_det_jac), 0, tolerance = 1e-6)
+})
+
+test_that("Neural Spline Flow backward is finite through identity tails", {
+  # Regression: the spline is the identity outside [-tail_bound, tail_bound],
+  # passed through torch_where(). torch_where still routes grad*0 into the
+  # unselected (tail) branch, and that branch used to compute a 0/0 -> NaN, so
+  # any point beyond the tail silently poisoned every downstream gradient.
+  # Force tail points (|theta| > 3) and check the loss backward is NaN-free.
+  set.seed(7)
+  mdl <- probotMakeFlow(4, 3, n_layers = 2, hidden_dim = 16, n_bins = 8,
+                        style = "nsf", device = "cpu")()
+  mdl$train()
+
+  # theta deliberately spans beyond the tail_bound = 3 in both directions
+  theta <- torch_tensor(matrix(
+    c(1.0, -1.0, 0.0,  5.0, -5.0, 0.0,  0.5, -3.5, 1.5), nrow = 3, byrow = TRUE
+  ))
+  x <- torch_randn(3, 4)
+
+  loss <- probotLossNF(theta, x, mdl)
+  expect_false(is.na(loss$item()))
+  loss$backward()
+
+  for (p in mdl$parameters) {
+    if (!is.null(p$grad)) {
+      expect_equal(torch_isnan(p$grad)$sum()$item(), 0)
+      expect_false(is.na(p$grad$abs()$max()$item()))
+    }
+  }
+
+  # Inverse (sampling) path: gradient through out-of-domain base draws must be
+  # finite too. Base draws scaled up so some values land beyond tail_bound = 3.
+  mdl$eval()
+  z <- (torch_randn(3, 3) * 1.5)$requires_grad_(TRUE)
+  theta_hat <- mdl$inverse(z, x)
+  expect_equal(torch_isnan(theta_hat)$sum()$item(), 0)
+  (theta_hat^2)$sum()$backward()
+  expect_equal(torch_isnan(z$grad)$sum()$item(), 0)
 })
 
 # ---- probotNetworkSuggest tests ----
@@ -146,29 +185,29 @@ test_that("probotNetworkSuggest returns list for MDN", {
 test_that("probotNetworkSuggest returns list for Flow", {
   s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("dim_x", "dim_theta", "n_layers", "hidden_dim", "style", "n_params"))
-  expect_equal(s$dim_x, 6L)
-  expect_equal(s$dim_theta, 4L)
-  expect_equal(s$style, "couple")
+  expect_named(s, c("input_dim", "output_dim", "n_layers", "hidden_dim", "style", "n_params"))
+  expect_equal(s$input_dim, 6L)
+  expect_equal(s$output_dim, 4L)
+  expect_equal(s$style, "realnvp")
 })
 
-test_that("probotNetworkSuggest Flow defaults to couple and is style-aware", {
+test_that("probotNetworkSuggest Flow defaults to RealNVP and is style-aware", {
   s_default <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
-  s_couple  <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "couple",
+  s_realnvp  <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "realnvp",
                                      verbose = FALSE)
-  expect_equal(s_default, s_couple)
+  expect_equal(s_default, s_realnvp)
 
-  s_auto <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "autoreg",
+  s_maf <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "maf",
                                   verbose = FALSE)
-  expect_equal(s_auto$style, "autoreg")
+  expect_equal(s_maf$style, "maf")
 })
 
-test_that("probotNetworkSuggest autoreg uses fewer blocks but wider conditioner", {
-  # Autoreg pays dim_theta sequential passes per block at sample time, so the
+test_that("probotNetworkSuggest MAF uses fewer blocks but wider conditioner", {
+  # MAF pays output_dim sequential passes per block at sample time, so the
   # heuristic keeps blocks low and shifts capacity into conditioner width.
   for (d in c(2, 4, 8, 16)) {
     cp <- probotNetworkSuggest(9, d, type = "Flow", verbose = FALSE)
-    ar <- probotNetworkSuggest(9, d, type = "Flow", flow_style = "autoreg",
+    ar <- probotNetworkSuggest(9, d, type = "Flow", flow_style = "maf",
                                verbose = FALSE)
     expect_lt(ar$n_layers, cp$n_layers)
     expect_gt(ar$hidden_dim, cp$hidden_dim)
@@ -192,7 +231,7 @@ test_that("probotNetworkSuggest hidden_dims hourglass shape for Point", {
   expect_equal(s$hidden_dims[2], 2L * s$hidden_dims[1])
 })
 
-test_that("probotNetworkSuggest Flow n_layers clamped (couple [4,24])", {
+test_that("probotNetworkSuggest Flow n_layers clamped (RealNVP [4,24])", {
   s_small <- probotNetworkSuggest(2, 1, type = "Flow", verbose = FALSE)
   expect_gte(s_small$n_layers, 4L)
 
@@ -200,22 +239,22 @@ test_that("probotNetworkSuggest Flow n_layers clamped (couple [4,24])", {
   expect_lte(s_large$n_layers, 24L)
 })
 
-test_that("probotNetworkSuggest Flow n_layers clamped (autoreg [3,10])", {
+test_that("probotNetworkSuggest Flow n_layers clamped (maf [3,10])", {
   s_small <- probotNetworkSuggest(2, 1, type = "Flow",
-                                   flow_style = "autoreg", verbose = FALSE)
+                                   flow_style = "maf", verbose = FALSE)
   expect_gte(s_small$n_layers, 3L)
   expect_lte(s_small$n_layers, 10L)
 
   s_large <- probotNetworkSuggest(2, 200, type = "Flow",
-                                   flow_style = "autoreg", verbose = FALSE)
+                                   flow_style = "maf", verbose = FALSE)
   expect_lte(s_large$n_layers, 10L)
 })
 
-test_that("probotNetworkSuggest autoreg hidden_dim has a higher floor", {
-  # Tiny dims: couple can drop to 32, autoreg floored at 64 for stable
+test_that("probotNetworkSuggest MAF hidden_dim has a higher floor", {
+  # Tiny dims: RealNVP can drop to 32, MAF floored at 64 for stable
   # prefix conditioning.
   cp <- probotNetworkSuggest(1, 1, type = "Flow", verbose = FALSE)
-  ar <- probotNetworkSuggest(1, 1, type = "Flow", flow_style = "autoreg",
+  ar <- probotNetworkSuggest(1, 1, type = "Flow", flow_style = "maf",
                              verbose = FALSE)
   expect_gte(ar$hidden_dim, 64L)
   expect_gte(cp$hidden_dim, 32L)
@@ -224,9 +263,9 @@ test_that("probotNetworkSuggest autoreg hidden_dim has a higher floor", {
 
 test_that("probotNetworkSuggest Flow suggestions respect n_train", {
   s_few <- probotNetworkSuggest(9, 4, n_train = 1000, type = "Flow",
-                                 flow_style = "autoreg", verbose = FALSE)
+                                 flow_style = "maf", verbose = FALSE)
   s_many <- probotNetworkSuggest(9, 4, n_train = 1e6, type = "Flow",
-                                 flow_style = "autoreg", verbose = FALSE)
+                                 flow_style = "maf", verbose = FALSE)
   expect_lte(s_few$n_layers, s_many$n_layers)
   expect_lte(s_few$hidden_dim, s_many$hidden_dim)
 })
@@ -263,6 +302,15 @@ test_that("probotNetworkSuggest hidden_dims clamped to [32, 1024]", {
   expect_lte(s2$hidden_dims[1], 1024L)
 })
 
+# ---- n_params tests ----
+
+# Defined before its first use below: testthat evaluates the file top to
+# bottom, so a helper declared after the tests that call it is not yet in
+# scope when those tests run.
+.count_params <- function(mdl) {
+  sum(vapply(mdl$parameters, function(p) prod(as.integer(p$shape)), numeric(1)))
+}
+
 test_that("probotNetworkSuggest Point output plugs into probotMakePoint", {
   s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
   mdl <- do.call(probotMakePoint, c(s, list(device = "cpu")))()
@@ -278,14 +326,14 @@ test_that("probotNetworkSuggest MDN output plugs into probotMakeMDN", {
 test_that("probotNetworkSuggest Flow output plugs into probotMakeFlow", {
   s <- probotNetworkSuggest(5, 2, type = "Flow", verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
-  expect_true(inherits(mdl, "probotFlowCouple"))
+  expect_true(inherits(mdl, "probotFlowRealNVP"))
 })
 
-test_that("probotNetworkSuggest autoreg output plugs into probotMakeFlow", {
-  s <- probotNetworkSuggest(5, 2, type = "Flow", flow_style = "autoreg",
+test_that("probotNetworkSuggest MAF output plugs into probotMakeFlow", {
+  s <- probotNetworkSuggest(5, 2, type = "Flow", flow_style = "maf",
                             verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
-  expect_true(inherits(mdl, "probotFlowAutoReg"))
+  expect_true(inherits(mdl, "probotFlowMAF"))
   expect_equal(mdl$n_blocks, s$n_layers)
 })
 
@@ -325,10 +373,6 @@ test_that("probotNetworkSuggest MDN components correct for odd output_dim", {
 
 # ---- n_params tests ----
 
-.count_params <- function(mdl) {
-  sum(vapply(mdl$parameters, function(p) prod(as.integer(p$shape)), numeric(1)))
-}
-
 test_that("probotNetworkSuggest n_params matches actual Point model", {
   s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
   mdl <- do.call(probotMakePoint, c(s, list(device = "cpu")))()
@@ -341,14 +385,14 @@ test_that("probotNetworkSuggest n_params matches actual MDN model", {
   expect_equal(s$n_params, .count_params(mdl))
 })
 
-test_that("probotNetworkSuggest n_params matches actual coupling Flow model", {
+test_that("probotNetworkSuggest n_params matches actual RealNVP Flow model", {
   s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
   expect_equal(s$n_params, .count_params(mdl))
 })
 
-test_that("probotNetworkSuggest n_params matches actual autoreg Flow model", {
-  s <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "autoreg",
+test_that("probotNetworkSuggest n_params matches actual MAF Flow model", {
+  s <- probotNetworkSuggest(6, 4, type = "Flow", flow_style = "maf",
                             verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
   # masks are buffers, not parameters, so the dense-counting heuristic is exact

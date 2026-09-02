@@ -1,32 +1,32 @@
 # ============================================================================
 # probotFlows.R
-# Normalizing Flow extensions for ProBot (Conditional NVP / Coupling Flows)
+# Normalizing Flow extensions for ProBot (Conditional NVP / RealNVP Flows)
 # ============================================================================
 
-# --- 1. Coupling Layer Definition ---
+# --- 1. RealNVP Layer Definition ---
 
-.probotCouplingLayer <- nn_module(
-    initialize = function(dim_theta, dim_x, hidden_dim = 32, soft_clamp=3, device = NULL) {
-      self$dim_theta <- dim_theta
-      self$dim_x <- dim_x
+.probotRealNVPLayer <- nn_module(
+    initialize = function(input_dim, output_dim, hidden_dim = 32, soft_clamp=3, device = NULL) {
+      self$output_dim <- output_dim
+      self$input_dim <- input_dim
       # Store on self: forward/inverse need it at call time. R restores
       # function environments from the enclosing namespace at load, so a
       # lexical reference to the constructor's argument silently breaks in
       # loaded packages ("object 'soft_clamp' not found").
       self$soft_clamp <- soft_clamp
 
-      # Split parameter space in half for coupling
-      self$d1 <- floor(dim_theta / 2)
-      self$d2 <- dim_theta - self$d1
+      # Split parameter space in half for RealNVP
+      self$d1 <- floor(output_dim / 2)
+      self$d2 <- output_dim - self$d1
       if (self$d1 < 1 || self$d2 < 1) {
-        stop("'dim_theta' must be >= 2 for .probotCouplingLayer() (got ", dim_theta, ")", call. = FALSE)
+        stop("'output_dim' must be >= 2 for .probotRealNVPLayer() (got ", output_dim, ")", call. = FALSE)
       }
       # Input to the shift/scale network is (first_half_of_theta + context_x)
-      input_dim <- self$d1 + dim_x
+      layer_input_dim <- self$d1 + input_dim
 
       # Network to predict affine transformation parameters for theta_2
       self$shift_scale_net <- nn_sequential(
-        nn_linear(input_dim, hidden_dim),
+        nn_linear(layer_input_dim, hidden_dim),
         nn_gelu(),
         nn_linear(hidden_dim, hidden_dim),
         nn_gelu(),
@@ -103,14 +103,14 @@
 
 # --- 2. Flow Network Definition ---
 
-probotFlowCouple <- nn_module(
-  "probotFlowCouple",
-    initialize = function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32, soft_clamp = 3, device = NULL) {
+probotFlowRealNVP <- nn_module(
+  "probotFlowRealNVP",
+    initialize = function(input_dim, output_dim, n_layers = 4, hidden_dim = 32, soft_clamp = 3, device = NULL) {
       self$n_layers <- n_layers
 
-      # Register each coupling layer directly on self so torch tracks parameters & device placement
+      # Register each RealNVP layer directly on self so torch tracks parameters & device placement
       for (i in seq_len(n_layers)) {
-        self[[paste0("coupling_layer_", i)]] <- .probotCouplingLayer(dim_theta, dim_x,
+        self[[paste0("RealNVP_layer_", i)]] <- .probotRealNVPLayer(input_dim, output_dim,
                                                   hidden_dim, soft_clamp=soft_clamp, device=device)
       }
 
@@ -127,7 +127,7 @@ probotFlowCouple <- nn_module(
       log_det_jac <- torch_zeros(theta$size(1), device = theta$device)$unsqueeze(1)
 
       for (i in seq_len(self$n_layers)) {
-        out <- self[[paste0("coupling_layer_", i)]]$forward(z, x)
+        out <- self[[paste0("RealNVP_layer_", i)]]$forward(z, x)
         z <- out$z
         log_det_jac <- log_det_jac + out$log_det_jac
       }
@@ -141,7 +141,7 @@ probotFlowCouple <- nn_module(
 
       # Iterate layers in reverse order
       for (i in rev(seq_len(self$n_layers))) {
-        theta <- self[[paste0("coupling_layer_", i)]]$inverse(theta, x)
+        theta <- self[[paste0("RealNVP_layer_", i)]]$inverse(theta, x)
       }
 
       return(theta)
@@ -168,12 +168,12 @@ probotFlowCouple <- nn_module(
     }
   )
 
-.probotFlowAutoRegBlock = nn_module(
-  ".probotFlowAutoRegBlock",
-  initialize = function(dim_theta, dim_x, n_layers = 2, hidden_dim = 500,
+.probotMAFBlock = nn_module(
+  ".probotMAFBlock",
+  initialize = function(input_dim, output_dim, n_layers = 2, hidden_dim = 500,
                         soft_clamp = 3, device = NULL) {
-    self$dim_theta <- dim_theta
-    self$dim_x <- dim_x
+    self$output_dim <- output_dim
+    self$input_dim <- input_dim
     self$hidden_dim <- hidden_dim
     self$n_layers <- n_layers
     self$soft_clamp <- soft_clamp
@@ -183,7 +183,7 @@ probotFlowCouple <- nn_module(
     }
 
     self$layers <- nn_module_list()
-    self$layers$append(.probotMaskedLinear(dim_theta + dim_x, hidden_dim))
+    self$layers$append(.probotMaskedLinear(output_dim + input_dim, hidden_dim))
 
     if (n_layers > 1) {
       for (i in 2:n_layers) {
@@ -191,17 +191,17 @@ probotFlowCouple <- nn_module(
       }
     }
 
-    self$output_layer <- .probotMaskedLinear(hidden_dim, 2 * dim_theta)
+    self$output_layer <- .probotMaskedLinear(hidden_dim, 2 * output_dim)
 
-    # 1. FIX: Context features (dim_x) get degree 0 so they are always visible.
-    # Target features (dim_theta) get sequential positions 1 to dim_theta.
-    input_degrees <- torch_cat(list(torch_arange(1, dim_theta), torch_zeros(dim_x)), dim = 1)
+    # 1. FIX: Context features (input_dim) get degree 0 so they are always visible.
+    # Target features (output_dim) get sequential positions 1 to output_dim.
+    input_degrees <- torch_cat(list(torch_arange(1, output_dim), torch_zeros(input_dim)), dim = 1)
 
-    # Hidden layers get values between 1 and dim_theta (not dim_theta - 1)
+    # Hidden layers get values between 1 and output_dim (not output_dim - 1)
     # This allows Parameter 1 to map safely across the conditioning paths
     hidden_degrees_list <- list()
     for (i in 1:n_layers) {
-      hidden_degrees_list[[i]] <- torch_remainder(torch_arange(0, hidden_dim - 1), dim_theta) + 1
+      hidden_degrees_list[[i]] <- torch_remainder(torch_arange(0, hidden_dim - 1), output_dim) + 1
     }
 
     # 2. Build hidden connection pathways
@@ -226,7 +226,7 @@ probotFlowCouple <- nn_module(
     # the shift and log_scale for theta_j depend only on theta_{1..j-1} and x.
     # Each output (shift_j, log_scale_j) sits at degree j; built in R to avoid
     # torch_repeat_interleave, whose CPU kernel rejects non-integer repeats.
-    output_degrees <- torch_tensor(rep(seq_len(dim_theta), each = 2), dtype = torch_long())
+    output_degrees <- torch_tensor(rep(seq_len(output_dim), each = 2), dtype = torch_long())
     last_hidden_degrees <- hidden_degrees_list[[n_layers]]
 
     output_mask <- output_degrees$unsqueeze(2) >= last_hidden_degrees$unsqueeze(1)
@@ -238,7 +238,7 @@ probotFlowCouple <- nn_module(
 
   forward_mlp = function(combined) {
     x <- combined
-    for (i in 1:self$n_layers) {
+    for (i in seq_len(self$n_layers)) {
       x <- self$layers[[i]](x) %>% nnf_gelu()
     }
     return(self$output_layer(x))
@@ -248,7 +248,7 @@ probotFlowCouple <- nn_module(
     combined <- torch_cat(list(theta, x), dim = 2)
     out <- self$forward_mlp(combined)
 
-    out_reshaped <- out$view(c(-1, self$dim_theta, 2))
+    out_reshaped <- out$view(c(-1, self$output_dim, 2))
     shift <- out_reshaped$narrow(3, 1, 1)$squeeze(3)
     log_scale <- out_reshaped$narrow(3, 2, 1)$squeeze(3)
 
@@ -262,11 +262,11 @@ probotFlowCouple <- nn_module(
   inverse = function(z, x, soft_clamp = self$soft_clamp) {
     theta <- torch_zeros_like(z)
 
-    for (i in 1:self$dim_theta) {
+    for (i in seq_len(self$output_dim)) {
       combined <- torch_cat(list(theta, x), dim = 2)
       out <- self$forward_mlp(combined)
 
-      out_reshaped <- out$view(c(-1, self$dim_theta, 2))
+      out_reshaped <- out$view(c(-1, self$output_dim, 2))
       shift_i <- out_reshaped$narrow(2, i, 1)$narrow(3, 1, 1)$squeeze(3)$squeeze(2)
       log_scale_i <- out_reshaped$narrow(2, i, 1)$narrow(3, 2, 1)$squeeze(3)$squeeze(2)
       log_scale_i = soft_clamp * torch_tanh(log_scale_i / soft_clamp)
@@ -283,8 +283,8 @@ probotFlowCouple <- nn_module(
 
 .probotPermutationLayer <- nn_module(
   ".probotPermutationLayer",
-  initialize = function(dim_theta, device = NULL) {
-    self$dim_theta <- dim_theta
+  initialize = function(output_dim, device = NULL) {
+    self$output_dim <- output_dim
   },
 
   forward = function(theta, x) {
@@ -327,9 +327,27 @@ probotFlowCouple <- nn_module(
 
   coordinate <- if (inverse) bottom_edges else left_edges
   coordinate_next <- coordinate + if (inverse) heights else widths
-  expanded_input <- input$unsqueeze(3)
+
+  # The spline is the identity outside [-tail_bound, tail_bound]; points there
+  # are passed through verbatim at the end via torch_where(). But torch_where's
+  # autograd still multiplies the gradient by the (unselected) result branch,
+  # and 0 * NaN = NaN. For a point outside the domain the bin mask below is
+  # empty, so the polynomial computes a 0/0 and produces NaN in that
+  # unselected branch, which poisons every downstream gradient. We therefore
+  # feed a domain-clamped copy (ic) into the bin selection and the polynomial:
+  # for points inside the domain the clamp is a no-op (identical value and
+  # gradient), and for points outside it keeps the unselected branch finite so
+  # no NaN propagates. The zero-selection guard additionally covers the exact
+  # boundary measure, where clamping alone would still select no bin.
+  ic <- torch_clamp(input, min = -tail_bound, max = tail_bound)
+  expanded_input <- ic$unsqueeze(3)
   bin_mask <- (expanded_input >= coordinate) & (expanded_input < coordinate_next)
   bin_mask <- bin_mask$to(dtype = dtype)
+  bin_mask <- torch_where(
+    bin_mask$sum(dim = 3, keepdim = TRUE) == 0,
+    torch_ones_like(bin_mask),
+    bin_mask
+  )
 
   select_bin <- function(values) (values * bin_mask)$sum(dim = 3)
   widths_bin <- select_bin(widths)
@@ -344,7 +362,7 @@ probotFlowCouple <- nn_module(
   inside <- (input > -tail_bound) & (input < tail_bound)
 
   if (inverse) {
-    y_minus_bottom <- input - bottom_bin
+    y_minus_bottom <- ic - bottom_bin
     a <- y_minus_bottom * (derivatives_left + derivatives_right - 2 * delta) +
       heights_bin * (delta - derivatives_left)
     b <- heights_bin * derivatives_left -
@@ -358,7 +376,7 @@ probotFlowCouple <- nn_module(
     return(torch_where(inside, result, input))
   }
 
-  theta <- (input - left_bin) / widths_bin
+  theta <- (ic - left_bin) / widths_bin
   theta_one_minus <- theta * (1 - theta)
   numerator <- heights_bin * (delta * theta^2 + derivatives_left * theta_one_minus)
   denominator <- delta +
@@ -375,12 +393,12 @@ probotFlowCouple <- nn_module(
 }
 
 .probotSplineCouplingLayer <- nn_module(
-  initialize = function(dim_theta, dim_x, hidden_dim = 32, n_bins = 8,
+  initialize = function(input_dim, output_dim, hidden_dim = 32, n_bins = 8,
                         tail_bound = 3, device = NULL) {
-    self$d1 <- floor(dim_theta / 2)
-    self$d2 <- dim_theta - self$d1
+    self$d1 <- floor(output_dim / 2)
+    self$d2 <- output_dim - self$d1
     if (self$d1 < 1 || self$d2 < 1) {
-      stop("'dim_theta' must be >= 2 for Neural Spline Flows", call. = FALSE)
+      stop("'output_dim' must be >= 2 for Neural Spline Flows", call. = FALSE)
     }
     if (n_bins < 2 || n_bins != as.integer(n_bins)) {
       stop("'n_bins' must be an integer of at least 2", call. = FALSE)
@@ -397,7 +415,7 @@ probotFlowCouple <- nn_module(
     self$min_bin_height <- 1e-3
     self$min_derivative <- 1e-3
     self$conditioner <- nn_sequential(
-      nn_linear(self$d1 + dim_x, hidden_dim),
+      nn_linear(self$d1 + input_dim, hidden_dim),
       nn_gelu(),
       nn_linear(hidden_dim, hidden_dim),
       nn_gelu(),
@@ -413,10 +431,10 @@ probotFlowCouple <- nn_module(
     raw_derivatives <- raw$narrow(3, 2 * self$n_bins + 1, self$n_bins - 1)
     widths <- self$min_bin_width +
       (2 * self$tail_bound - self$min_bin_width * self$n_bins) *
-      torch_softmax(raw_widths, dim = 3)
+      nnf_softmax(raw_widths, dim = 3)
     heights <- self$min_bin_height +
       (2 * self$tail_bound - self$min_bin_height * self$n_bins) *
-      torch_softmax(raw_heights, dim = 3)
+      nnf_softmax(raw_heights, dim = 3)
     derivatives <- self$min_derivative + nnf_softplus(raw_derivatives)
     boundary <- torch_ones(c(raw$size(1), self$d2, 1), dtype = dtype, device = device)
     list(
@@ -455,12 +473,12 @@ probotFlowCouple <- nn_module(
 
 probotFlowNSF <- nn_module(
   "probotFlowNSF",
-  initialize = function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
+  initialize = function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
                         n_bins = 8, tail_bound = 3, device = NULL) {
     self$n_layers <- n_layers
     for (i in seq_len(n_layers)) {
       self[[paste0("spline_layer_", i)]] <- .probotSplineCouplingLayer(
-        dim_theta, dim_x, hidden_dim, n_bins, tail_bound, device
+        input_dim, output_dim, hidden_dim, n_bins, tail_bound, device
       )
     }
     self$to(device = .probotChooseDevice(device))
@@ -487,58 +505,23 @@ probotFlowNSF <- nn_module(
   }
 )
 
-probotMakeFlow <- function(dim_theta, dim_x, n_layers = 4, hidden_dim = 32,
-                           n_blocks = 5, n_layers_per_block = 2,
-                           soft_clamp = 3, device = NULL, style = "couple",
-                           n_bins = 8, tail_bound = 3, ...) {
-  # Facade so probotLoad()'s "flow" reconstruction works. Returns a
-  # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
-  # Disambiguates the available flow architectures:
-  #   style = "couple"    -> stacked affine NVP coupling layers (default)
-  #   style = "autoreg"   -> masked autoregressive blocks + permutation layers
-  #   style = "nsf"       -> stacked rational-quadratic spline coupling layers
-  match.arg(style, c("couple", "autoreg", "nsf"))
-  function() {
-    # Calling a named nn_module with its constructor args already returns an
-    # instantiated module, so no trailing `()` is added here.
-    switch(style,
-      couple = probotFlowCouple(
-        dim_theta = dim_theta, dim_x = dim_x, n_layers = n_layers,
-        hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
-      ),
-      # hidden_dim is passed through untouched (no clamping) so that a
-      # save -> load round trip reconstructs the exact architecture.
-      autoreg = probotFlowAutoReg(
-        dim_theta = dim_theta, dim_x = dim_x, n_blocks = n_blocks,
-        n_layers_per_block = 2, hidden_dim = hidden_dim,
-        soft_clamp = soft_clamp, device = device
-      ),
-      nsf = probotFlowNSF(
-        dim_theta = dim_theta, dim_x = dim_x, n_layers = n_layers,
-        hidden_dim = hidden_dim, n_bins = n_bins, tail_bound = tail_bound,
-        device = device
-      )
-    )
-  }
-}
-
-probotFlowAutoReg <- nn_module(
-  "probotFlowAutoReg",
-  initialize = function(dim_theta, dim_x, n_blocks = 5, n_layers_per_block = 2, hidden_dim = 500, soft_clamp = 3, device = NULL) {
-    self$dim_theta <- dim_theta
-    self$dim_x <- dim_x
+probotFlowMAF <- nn_module(
+  "probotFlowMAF",
+  initialize = function(input_dim, output_dim, n_blocks = 5, n_layers_per_block = 2, hidden_dim = 500, soft_clamp = 3, device = NULL) {
+    self$output_dim <- output_dim
+    self$input_dim <- input_dim
     self$n_blocks <- n_blocks
     self$soft_clamp <- soft_clamp
 
     # Track steps sequentially
     self$blocks <- nn_module_list()
 
-    for (i in 1:n_blocks) {
+    for (i in seq_len(n_blocks)) {
       # 1. Add the core Masked Autoregressive Flow block
       self$blocks$append(
-        .probotFlowAutoRegBlock(
-          dim_theta = dim_theta,
-          dim_x = dim_x,
+        .probotMAFBlock(
+          input_dim = input_dim,
+          output_dim = output_dim,
           n_layers = n_layers_per_block,
           hidden_dim = hidden_dim,
           soft_clamp = soft_clamp,
@@ -548,7 +531,7 @@ probotFlowAutoReg <- nn_module(
 
       # 2. Add an alternating permutation layer between blocks (but skip after the very last block)
       if (i < n_blocks) {
-        self$blocks$append(.probotPermutationLayer(dim_theta = dim_theta, device = device))
+        self$blocks$append(.probotPermutationLayer(output_dim = output_dim, device = device))
       }
     }
   },
@@ -578,3 +561,49 @@ probotFlowAutoReg <- nn_module(
     return(current_theta)
   }
 )
+
+probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
+                           n_blocks = NULL, n_layers_per_block = 2,
+                           soft_clamp = 3, device = NULL, style = "realnvp",
+                           n_bins = 8, tail_bound = 3, ...) {
+  # Facade so probotLoad()'s "flow" reconstruction works. Returns a
+  # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
+  # Disambiguates the available flow architectures:
+  #   style = "realnvp" -> stacked affine RealNVP layers (default)
+  #   style = "maf"     -> masked autoregressive blocks + permutation layers
+  #   style = "nsf"     -> stacked rational-quadratic spline coupling layers
+  match.arg(style, c("realnvp", "maf", "nsf"))
+
+  # Depth for style = "maf" is expressed in blocks, but probotNetworkSuggest()
+  # reports it as n_layers (and its n_params heuristic counts exactly n_layers
+  # blocks). Map n_layers -> n_blocks so a suggestion can be piped straight in;
+  # an explicit n_blocks still wins.
+  maf_blocks <- if (!is.null(n_blocks)) n_blocks else n_layers
+
+  output = function() {
+    # Calling a named nn_module with its constructor args already returns an
+    # instantiated module, so no trailing `()` is added here.
+    switch(style,
+           realnvp = probotFlowRealNVP(
+             input_dim = input_dim, output_dim = output_dim, n_layers = n_layers,
+             hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
+           ),
+           # hidden_dim is passed through untouched (no clamping) so that a
+           # save -> load round trip reconstructs the exact architecture.
+           maf = probotFlowMAF(
+             input_dim = input_dim, output_dim = output_dim, n_blocks = maf_blocks,
+             n_layers_per_block = 2, hidden_dim = hidden_dim,
+             soft_clamp = soft_clamp, device = device
+           ),
+           nsf = probotFlowNSF(
+             input_dim = input_dim, output_dim = output_dim, n_layers = n_layers,
+             hidden_dim = hidden_dim, n_bins = n_bins, tail_bound = tail_bound,
+             device = device
+           )
+    )
+  }
+  # Return the zero-arg constructor itself, matching probotMakeMDN()/
+  # probotMakePoint() and the `probotMakeX(...)()` call pattern used by
+  # probotLoad(), the tests, and the vignettes.
+  return(output)
+}
