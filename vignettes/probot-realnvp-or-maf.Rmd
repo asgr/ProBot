@@ -315,10 +315,10 @@ legend("bottomleft", legend = c("RealNVP", "MAF"),
 
 ```{r posterior-width, fig.width = 8, fig.height = 4, eval = eval_train}
 obs <- x_sc[1, , drop = FALSE]
-s_cp <- probotSamplePostNF(input = obs, model = fit_cp$model, n_samples = 5000, dim_theta = 2,
+s_cp <- probotSamplePostNF(input = obs, model = fit_cp$model, n_samples = 5000, output_dim = 2,
   col_means = attributes(t_sc)$col_scale$col_means,
   col_sds = attributes(t_sc)$col_scale$col_sds)
-s_ar <- probotSamplePostNF(input = obs, model = fit_ar$model, n_samples = 5000, dim_theta = 2,
+s_ar <- probotSamplePostNF(input = obs, model = fit_ar$model, n_samples = 5000, output_dim = 2,
   col_means = attributes(t_sc)$col_scale$col_means,
   col_sds = attributes(t_sc)$col_scale$col_sds)
 
@@ -337,13 +337,64 @@ Both have found a reasonable posterior centred around the 'truth' but the MAF is
 
 **A caution on reading these plots.** Do not treat a narrower posterior as better.
 Narrower means more confident; whether that confidence is *earned* is a calibration
-question, answered by PIT and TARP (see *Going with the Flow* and the CRPS diagnostic
-vignette), not by width. In short-budget runs of the comparison above we observed
-MAF reaching a lower training NLL while producing visibly tighter posteriors — but
-at short budgets both styles under-covered held-out truth substantially, so neither
-result should be over-interpreted. Judge architectures on calibration diagnostics over
-a held-out sample, at a budget where the loss has genuinely plateaued, and compare
-wall-clock only on the inverse pass you actually run.
+question, answered by PIT and TARP, not by width. In short-budget runs of the
+comparison above we observed MAF reaching a lower training NLL while producing
+visibly tighter posteriors — but at short budgets both styles under-covered
+held-out truth substantially, so neither result should be over-interpreted. Judge
+architectures on calibration diagnostics over a held-out sample, at a budget where
+the loss has genuinely plateaued, and compare wall-clock only on the inverse pass
+you actually run.
+
+### Scoring the two architectures
+
+`probotPIT()`, `probotTARP()` and `probotCRPS()` take a flow model in place of an
+MDN — same call, no `mdn_components` — and batch the inverse pass internally, so
+this is cheap relative to training. Each new observation draws its own truth here,
+which is what a held-out calibration check requires.
+
+```{r calibration, eval = eval_train}
+n_cal  <- 2000
+theta_cal <- cbind(u = runif(n_cal, -1, 1), v = runif(n_cal, -1, 1))
+x_cal  <- make_polynomial_output(theta_cal)
+x_cal[] <- rnorm(length(x_cal), mean = x_cal, sd = diff(range(x_train)) * 1e-3)
+x_cal  <- probotScaleForward(x_cal,
+                             col_means = attr(x_sc, "col_scale")$col_means,
+                             col_sds   = attr(x_sc, "col_scale")$col_sds)
+
+sc <- attr(t_sc, "col_scale")
+
+calibrate <- function(style, mdl) {
+  pit  <- probotPIT(x_cal, mdl, params = theta_cal, n_samples = 2000,
+                    col_means = sc$col_means, col_sds = sc$col_sds,
+                    verbose = FALSE)
+  tarp <- probotTARP(x_cal, mdl, params = theta_cal, n_samples = 2000,
+                     col_means = sc$col_means, col_sds = sc$col_sds,
+                     verbose = FALSE)
+  crps <- probotCRPS(x_cal, mdl, params = theta_cal, n_samples = 2000,
+                     col_means = sc$col_means, col_sds = sc$col_sds,
+                     col_names = colnames(theta_cal), verbose = FALSE)
+  data.frame(
+    style = style,
+    ks_pit_u = ks.test(pit[, 1], "punif")$p.value,
+    ks_pit_v = ks.test(pit[, 2], "punif")$p.value,
+    ks_tarp  = ks.test(tarp, "punif")$p.value,
+    mean_crps_u = mean(crps[, 1]),
+    mean_crps_v = mean(crps[, 2])
+  )
+}
+
+rbind(calibrate("realnvp", fit_cp$model), calibrate("maf", fit_ar$model))
+```
+
+**Reading this table.** The KS p-values ask whether the PIT/TARP values look
+uniform; a small p-value is evidence of miscalibration, and neither model is
+guaranteed to pass at `n_cal = 2000` — treat these as a screen, not a verdict.
+R will warn that "ties should not be present" for these tests: PIT and TARP
+coverage values are multiples of `1/n_samples`, so ties are unavoidable and the
+warning is expected. It makes the KS test slightly conservative rather than
+wrong. CRPS is the quantity to rank on: it is a proper score, so the model with
+the lower mean CRPS is the better predictor of the posterior *as a distribution*,
+even when both look roughly calibrated.
 
 ---
 

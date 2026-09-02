@@ -245,27 +245,31 @@ multi-modal structure naturally without specifying the number of modes in advanc
 ## Population-level summaries
 
 For a broader assessment we compute posterior means and standard deviations across
-the test set by sampling the flow at each observation.
+the test set by sampling the flow at each observation. Passing all the conditioning
+rows in one call keeps the inverse pass batched; the sampler chunks the work
+internally, so peak memory stays bounded.
 
 ```{r population-summaries, eval = eval_global}
 n_eval    <- min(n_test, 2000)   # limit for speed in this demo
 post_mean <- matrix(NA_real_, n_eval, ncol(theta_test), dimnames = list(NULL, colnames(theta_test)))
 post_sd   <- matrix(NA_real_, n_eval, ncol(theta_test), dimnames = list(NULL, colnames(theta_test)))
 
-for (i in seq_len(n_eval)) {
-  samp_i <- probotSamplePostNF(
-    input   = output_test_scaled[i, , drop = FALSE],
-    model   = flow_model,
-    n_samples = 500,
-    col_means = attr(input_scaled, "col_scale")$col_means,
-    col_sds   = attr(input_scaled, "col_scale")$col_sds,
-    col_names = colnames(theta_train)
-  )
+samp_all <- probotSamplePostNF(
+  input     = output_test_scaled[seq_len(n_eval), , drop = FALSE],
+  model     = flow_model,
+  n_samples = 500,
+  col_means = attr(input_scaled, "col_scale")$col_means,
+  col_sds   = attr(input_scaled, "col_scale")$col_sds,
+  col_names = colnames(theta_train),
+  verbose   = TRUE
+)
 
+# samp_all is (n_samples x n_params x n_eval). The matrix() guard keeps the
+# per-observation slice 2-D even when there is a single parameter.
+for (i in seq_len(n_eval)) {
+  samp_i <- matrix(samp_all[, , i], nrow = nrow(samp_all))
   post_mean[i, ] <- colMeans(samp_i)
   post_sd[i, ]   <- apply(samp_i, 2, sd)
-
-  if (i %% 500 == 0) cat(i, "\n")
 }
 ```
 
@@ -295,9 +299,17 @@ for (j in seq_len(ncol(theta_test))) {
 
 ## Calibration diagnostics
 
-Because `probotPIT()` and `probotTARP()` call `probotSamplePostMDN()` internally,
-we implement equivalent NF-based diagnostics directly. The logic is identical — only
-the sampling function differs.
+`probotPIT()`, `probotTARP()` and `probotCRPS()` work on flows exactly as they do
+on MDNs: they read the model class, dispatch to `probotSamplePostNF()` instead of
+`probotSamplePostMDN()`, and sample in batches rather than one observation at a
+time. The only interface difference is that `mdn_components` is left out.
+
+```{r assess-args, eval = eval_global}
+flow_scale <- attr(input_scaled, "col_scale")
+
+n_pit  <- min(n_test, 1000)
+n_samp <- 2000
+```
 
 ### PIT: marginal calibration
 
@@ -306,29 +318,24 @@ of posterior samples that fall *below* the true value. Under a perfect posterior
 this is uniform on [0, 1].
 
 ```{r pit-nf, eval = eval_global}
-n_pit   <- min(n_test, 1000)
-n_samp_pit <- 2000
-
-pit_nf <- matrix(NA_real_, n_pit, ncol(theta_test),
-                 dimnames = list(NULL, colnames(theta_test)))
-
-for (i in seq_len(n_pit)) {
-  samp_i <- probotSamplePostNF(
-    input   = output_test_scaled[i, , drop = FALSE],
-    model   = flow_model,
-    n_samples = n_samp_pit,
-    col_means = attr(input_scaled, "col_scale")$col_means,
-    col_sds   = attr(input_scaled, "col_scale")$col_sds,
-    col_names = colnames(theta_train)
-  )
-
-  for (j in seq_len(ncol(theta_test))) {
-    pit_nf[i, j] <- mean(samp_i[, j] <= theta_test[i, j])
-  }
-
-  if (i %% 200 == 0) cat(i, "\n")
-}
+pit_nf <- probotPIT(
+  input       = output_test_scaled,
+  model       = flow_model,
+  params      = theta_test,
+  n_test      = n_pit,
+  n_samples   = n_samp,
+  col_means   = flow_scale$col_means,
+  col_sds     = flow_scale$col_sds,
+  col_names   = colnames(theta_train),
+  verbose     = TRUE
+)
 ```
+
+`batch_size` is left at `NULL`, which lets the sampler choose a chunk size that
+bounds the working set at roughly two million draws. Passing `input` whole and
+letting `n_test` do the subsetting is deliberate: the diagnostics then feed the
+conditioning rows to the flow in one batched inverse pass per chunk, instead of
+paying one call per observation.
 
 ```{r pit-plot, fig.width = 5, fig.height = 5, eval = eval_global}
 magtri(pit_nf)
@@ -348,29 +355,16 @@ direction and computes the coverage fraction. Repeating over many observations a
 averaging over random directions gives an omnibus test of the full joint posterior.
 
 ```{r tarp-nf, eval = eval_global}
-n_tarp      <- min(n_test, 1000)
-n_samp_tarp <- 2000
-
-tarp_nf <- numeric(n_tarp)
-
-for (i in seq_len(n_tarp)) {
-  samp_i <- probotSamplePostNF(
-    input   = output_test_scaled[i, , drop = FALSE],
-    model   = flow_model,
-    n_samples = n_samp_tarp,
-    col_means = attr(input_scaled, "col_scale")$col_means,
-    col_sds   = attr(input_scaled, "col_scale")$col_sds,
-    col_names = colnames(theta_train)
-  )
-
-  direction    <- rnorm(ncol(samp_i))
-  direction    <- direction / sqrt(sum(direction^2))
-  truth_proj   <- sum(theta_test[i, ] * direction)
-  sample_proj  <- as.vector(samp_i %*% direction)
-  tarp_nf[i]  <- mean(sample_proj <= truth_proj)
-
-  if (i %% 200 == 0) cat(i, "\n")
-}
+tarp_nf <- probotTARP(
+  input       = output_test_scaled,
+  model       = flow_model,
+  params      = theta_test,
+  n_test      = n_pit,
+  n_samples   = n_samp,
+  col_means   = flow_scale$col_means,
+  col_sds     = flow_scale$col_sds,
+  verbose     = TRUE
+)
 ```
 
 ```{r tarp-plot, fig.width = 6, fig.height = 4, eval = eval_global}
@@ -390,6 +384,47 @@ ks.test(tarp_nf, "punif")
 - *Excess mass near 0.5* → posterior is over-dispersed (too wide in joint space).
 - *Excess mass near 0 and 1* → posterior is under-dispersed (too narrow in joint space).
 - *Significant KS p-value* (p < 0.05) → evidence of joint miscalibration.
+
+### CRPS: one number per parameter
+
+PIT and TARP answer a *calibration* question, which is only half of what a good
+posterior needs: a posterior that is uniform in its PIT values but absurdly wide
+passes them while being useless. The Continuous Ranked Probability Score is a
+proper scoring rule that penalises miscalibration and lack of sharpness together,
+reported per (observation, parameter) pair. Lower is better.
+
+```{r crps-nf, eval = eval_global}
+crps_nf <- probotCRPS(
+  input       = output_test_scaled,
+  model       = flow_model,
+  params      = theta_test,
+  n_test      = n_pit,
+  n_samples   = n_samp,
+  col_means   = flow_scale$col_means,
+  col_sds     = flow_scale$col_sds,
+  col_names   = colnames(theta_train),
+  verbose     = TRUE
+)
+
+colMeans(crps_nf)
+```
+
+Because CRPS has units (of the parameter), the column means are only comparable
+across models fitted to the *same* parameter space — not across parameters. The
+useful reading is relative: compare `colMeans(crps_nf)` between an MDN and a flow
+trained on identical data, or track it across training budgets.
+
+```{r crps-plot, fig.width = 6, fig.height = 4, eval = eval_global}
+maghist(
+  crps_nf[, 1], breaks = 30,
+  xlab = "CRPS", ylab = "Count",
+  main = paste("Normalising Flow — CRPS,", colnames(theta_train)[1])
+)
+```
+
+A distribution with a long right tail means a minority of observations receive
+posterior predictions that are badly off; those are the cases worth inspecting
+individually.
 
 ---
 
@@ -414,7 +449,11 @@ MDNs are often preferable when:
 
 - The posterior is approximately Gaussian or a small mixture thereof.
 - Training speed and simplicity are priorities.
-- You want built-in ProBot utilities (e.g., `probotPIT()`, `probotTARP()`) without modification.
+- You want closed-form posterior summaries: `probotMarginalPostMDN()` gives the
+  mixture's mean and standard deviation without drawing any samples.
+
+Note that the calibration diagnostics are *not* a reason to prefer an MDN:
+`probotPIT()`, `probotTARP()` and `probotCRPS()` accept a flow model directly.
 
 ---
 

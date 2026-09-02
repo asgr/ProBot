@@ -1,12 +1,12 @@
 probotPIT <- function(
     input,
     model,
-    mdn_components,
+    mdn_components = NULL,
     params,
     n_test = NULL,
     n_samples = 1e4,
-    col_means,
-    col_sds,
+    col_means = NULL,
+    col_sds = NULL,
     col_names = NULL,
     batch_size = NULL,
     verbose = TRUE
@@ -32,17 +32,17 @@ probotPIT <- function(
   # rather than n_test.
   .probotChunkApply(
     input = input, n_test = n_test, model = model,
-    mdn_components = mdn_components, n_samples = n_samples,
+    mdn_components = mdn_components, output_dim = n_params,
+    n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
     batch_size = batch_size, verbose = verbose,
     fun = function(rows, draws) {
-      for (k in seq_along(rows)) {
-        i <- rows[k]
-        obs <- .probotObsDraws(draws, k)
-        for (j in seq_len(n_params)) {
-          pit[i, j] <<- mean(obs[, j] <= params[i, j])
-        }
-      }
+      # Flattening the (S x D x K) array to (S x D*K) leaves parameter fastest
+      # within observation, which is the order as.vector(t(params)) produces.
+      mat <- matrix(draws, nrow = n_samples)
+      truth <- as.vector(t(params[rows, , drop = FALSE]))
+      cmp <- sweep(mat, 2L, truth, FUN = "<=")
+      pit[rows, ] <<- t(matrix(colSums(cmp) / n_samples, nrow = n_params))
     }
   )
 
@@ -54,18 +54,20 @@ probotPIT <- function(
 probotTARP <- function(
     input,
     model,
-    mdn_components,
+    mdn_components = NULL,
     params,
     n_test = NULL,
     n_samples = 1e4,
-    col_means,
-    col_sds,
+    col_means = NULL,
+    col_sds = NULL,
     col_names = NULL,
     batch_size = NULL,
     verbose = TRUE
 ){
 
   n_test <- .probotNTest(n_test, params)
+
+  n_params <- ncol(params)
 
   tarp <- numeric(n_test)
 
@@ -75,23 +77,37 @@ probotTARP <- function(
 
   .probotChunkApply(
     input = input, n_test = n_test, model = model,
-    mdn_components = mdn_components, n_samples = n_samples,
+    mdn_components = mdn_components, output_dim = n_params,
+    n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
     batch_size = batch_size, verbose = verbose,
     fun = function(rows, draws) {
-      for (k in seq_along(rows)) {
-        i <- rows[k]
-        obs <- .probotObsDraws(draws, k)
+      n_obs <- length(rows)
 
-        # A fresh unit direction per observation, drawn on the R side.
-        direction <- rnorm(ncol(obs))
-        direction <- direction / sqrt(sum(direction^2))
+      # A fresh unit direction per observation, drawn on the R side and held as
+      # one (n_params x n_obs) matrix.
+      direction <- matrix(rnorm(n_params * n_obs), nrow = n_params)
+      direction <- direction / sqrt(colSums(direction^2))
 
-        sample_proj <- as.vector(obs %*% direction)
-        truth_proj <- sum(params[i, ] * direction)
+      # proj[s, k] = sum_d draws[s, d, k] * direction[d, k]. Accumulated over
+      # the (small) parameter axis because R's elementwise recycling cannot
+      # broadcast a length-n_params vector across the sample axis directly.
+      proj <- matrix(0, nrow = n_samples, ncol = n_obs)
 
-        tarp[i] <<- mean(sample_proj <= truth_proj)
+      for (d in seq_len(n_params)) {
+        proj <- proj +
+          matrix(draws[, d, ], nrow = n_samples) *
+          matrix(rep(direction[d, ], each = n_samples), nrow = n_samples)
       }
+
+      truth_proj <- colSums(direction * t(params[rows, , drop = FALSE]))
+
+      # Each observation's truth is constant down its column of `proj`, so the
+      # threshold must be repeated n_samples times, not recycled blindly.
+      truth_mat <- matrix(rep(truth_proj, each = n_samples),
+                          nrow = n_samples, ncol = n_obs)
+
+      tarp[rows] <<- colMeans(proj <= truth_mat)
     }
   )
 
@@ -101,12 +117,12 @@ probotTARP <- function(
 probotCRPS <- function(
     input,
     model,
-    mdn_components,
+    mdn_components = NULL,
     params,
     n_test = NULL,
     n_samples = 1e4,
-    col_means,
-    col_sds,
+    col_means = NULL,
+    col_sds = NULL,
     col_names = NULL,
     batch_size = NULL,
     verbose = TRUE
@@ -127,17 +143,18 @@ probotCRPS <- function(
 
   .probotChunkApply(
     input = input, n_test = n_test, model = model,
-    mdn_components = mdn_components, n_samples = n_samples,
+    mdn_components = mdn_components, output_dim = n_params,
+    n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
     batch_size = batch_size, verbose = verbose,
     fun = function(rows, draws) {
-      for (k in seq_along(rows)) {
-        i <- rows[k]
-        obs <- .probotObsDraws(draws, k)
-        for (j in seq_len(n_params)) {
-          crps[i, j] <<- .probotCRPSSample(obs[, j], params[i, j], w)
-        }
-      }
+      mat <- matrix(draws, nrow = n_samples)
+      truth <- as.vector(t(params[rows, , drop = FALSE]))
+
+      mae <- colMeans(abs(sweep(mat, 2L, truth, FUN = "-")))
+      penalty <- apply(mat, 2L, function(z) sum(w * sort(z)))
+
+      crps[rows, ] <<- t(matrix(mae - penalty, nrow = n_params))
     }
   )
 
@@ -159,16 +176,73 @@ probotCRPS <- function(
   }
 }
 
+# Flow architectures are recognised by their nn_module class names; anything
+# else is treated as an MDN.
+.probotFlowClasses <- c("probotFlowRealNVP", "probotFlowMAF", "probotFlowNSF")
+
+.probotIsFlow <- function(model) {
+  inherits(model, .probotFlowClasses)
+}
+
+# Resolve the sampler that backs the assessment functions and return a closure
+# with a common signature, so callers stay model-agnostic. A flow has no
+# mixture head to read the parameter dimension from, so output_dim must be
+# supplied; it is unused on the MDN path.
+.probotPostSampler <- function(model, mdn_components, output_dim) {
+  if (.probotIsFlow(model)) {
+    if (is.null(output_dim)) {
+      stop("'output_dim' is required when sampling from a flow model.")
+    }
+    function(input, n_samples, col_means, col_sds, col_names, batch_size,
+             verbose) {
+      probotSamplePostNF(
+        input = input,
+        model = model,
+        n_samples = n_samples,
+        col_means = col_means,
+        col_sds = col_sds,
+        col_names = col_names,
+        output_dim = output_dim,
+        batch_size = batch_size,
+        verbose = verbose
+      )
+    }
+  } else {
+    if (is.null(mdn_components)) {
+      stop(
+        "'mdn_components' is required for MDN models (it is ignored for ",
+        "normalising flow models)."
+      )
+    }
+    function(input, n_samples, col_means, col_sds, col_names, batch_size,
+             verbose) {
+      probotSamplePostMDN(
+        input = input,
+        model = model,
+        mdn_components = mdn_components,
+        n_samples = n_samples,
+        col_means = col_means,
+        col_sds = col_sds,
+        col_names = col_names,
+        batch_size = batch_size,
+        verbose = verbose
+      )
+    }
+  }
+}
+
 # Bulk-sample the posterior for the first n_test rows of `input` in chunks of
 # `batch_size` observations, calling fun(rows, draws) on each. `draws` is an
 # (n_samples x n_params x length(rows)) array. Chunks are generated lazily and
 # handed straight to `fun`, so peak memory is set by the chunk size rather than
-# by n_test, while the forward pass stays batched.
+# by n_test, while the sampling pass stays batched. The sampler is chosen from
+# the class of `model`, so MDN and flow models both work.
 .probotChunkApply <- function(
     input,
     n_test,
     model,
     mdn_components,
+    output_dim,
     n_samples,
     col_means,
     col_sds,
@@ -189,6 +263,10 @@ probotCRPS <- function(
          " for n_test = ", n_test, ").")
   }
 
+  sample_post <- .probotPostSampler(
+    model = model, mdn_components = mdn_components, output_dim = output_dim
+  )
+
   if (is.null(batch_size)) {
     # Size the chunk so that roughly 2e6 draw rows exist at any one time.
     batch_size <- max(1L, floor(2e6 / n_samples))
@@ -202,10 +280,8 @@ probotCRPS <- function(
 
     rows <- seq(start, end)
 
-    draws <- probotSamplePostMDN(
+    draws <- sample_post(
       input = input[rows, , drop = FALSE],
-      model = model,
-      mdn_components = mdn_components,
       n_samples = n_samples,
       col_means = col_means,
       col_sds = col_sds,
@@ -222,17 +298,18 @@ probotCRPS <- function(
       draws <- array(draws, dim = c(dim(draws), 1L))
     }
 
+    if (dim(draws)[2] != output_dim) {
+      stop(
+        "Posterior samples have ", dim(draws)[2], " dimensions but params has ",
+        output_dim, ". `params` (and any col_means/col_sds) must match the ",
+        "model's parameter space."
+      )
+    }
+
     fun(rows, draws)
   }
 
   invisible(NULL)
-}
-
-# One observation's (n_samples x n_params) draw matrix. Indexing a 3-D array
-# with [, , k] drops *both* length-1 dimensions, so a 1-parameter model would
-# come back as a bare vector; rebuild the matrix explicitly.
-.probotObsDraws <- function(draws, k) {
-  matrix(draws[, , k], nrow = dim(draws)[1], ncol = dim(draws)[2])
 }
 
 # Weights for the sorted-sample penalty term (2k - S - 1) / S^2.
