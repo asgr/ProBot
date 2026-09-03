@@ -370,7 +370,13 @@ probotFlowRealNVP <- nn_module(
     c <- -delta * y_minus_bottom
     discriminant <- torch_clamp(b^2 - 4 * a * c, min = 0)
     sqrt_discriminant <- torch_sqrt(discriminant)
-    denom <- -(torch_abs(b) + sqrt_discriminant)
+    # The root lying inside the bin is 2c / -(b + sqrt(disc)). Wrapping b in
+    # torch_abs() here silently switches to the *other* root whenever b < 0 --
+    # an order-1 error, not a precision issue. b >= 0 for an untrained
+    # conditioner, so a round-trip test on a freshly initialised model passes
+    # either way and cannot catch it; the regression test scales the
+    # conditioner weights to reach the trained regime where b goes negative.
+    denom <- -(b + sqrt_discriminant)
     root <- (2 * c) / denom
     result <- left_bin + root * widths_bin
     return(torch_where(inside, result, input))

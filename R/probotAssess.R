@@ -35,7 +35,7 @@ probotPIT <- function(
     mdn_components = mdn_components, output_dim = n_params,
     n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
-    batch_size = batch_size, verbose = verbose,
+    batch_size = batch_size, verbose = verbose, label = "probotPIT",
     fun = function(rows, draws) {
       # Flattening the (S x D x K) array to (S x D*K) leaves parameter fastest
       # within observation, which is the order as.vector(t(params)) produces.
@@ -80,7 +80,7 @@ probotTARP <- function(
     mdn_components = mdn_components, output_dim = n_params,
     n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
-    batch_size = batch_size, verbose = verbose,
+    batch_size = batch_size, verbose = verbose, label = "probotTARP",
     fun = function(rows, draws) {
       n_obs <- length(rows)
 
@@ -146,7 +146,7 @@ probotCRPS <- function(
     mdn_components = mdn_components, output_dim = n_params,
     n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
-    batch_size = batch_size, verbose = verbose,
+    batch_size = batch_size, verbose = verbose, label = "probotCRPS",
     fun = function(rows, draws) {
       mat <- matrix(draws, nrow = n_samples)
       truth <- as.vector(t(params[rows, , drop = FALSE]))
@@ -236,7 +236,8 @@ probotCRPS <- function(
 # (n_samples x n_params x length(rows)) array. Chunks are generated lazily and
 # handed straight to `fun`, so peak memory is set by the chunk size rather than
 # by n_test, while the sampling pass stays batched. The sampler is chosen from
-# the class of `model`, so MDN and flow models both work.
+# the class of `model`, so MDN and flow models both work. `label` names the
+# calling function in the progress messages.
 .probotChunkApply <- function(
     input,
     n_test,
@@ -249,6 +250,7 @@ probotCRPS <- function(
     col_names,
     batch_size,
     verbose,
+    label = "probotChunkApply",
     fun
 ){
   # A bare vector is one observation; as.matrix() would orient it as a column.
@@ -274,11 +276,30 @@ probotCRPS <- function(
 
   batch_size <- as.integer(min(batch_size, n_test))
 
+  n_chunks <- as.integer(ceiling(n_test / batch_size))
+  # At most ~20 progress lines however many chunks there are, but always the
+  # first and last, so a long run reports that it has started.
+  progress_every <- max(1L, as.integer(floor(n_chunks / 20)))
+
+  chunk_i <- 0L
+
   for (start in seq(1L, n_test, by = batch_size)) {
+
+    chunk_i <- chunk_i + 1L
 
     end <- min(start + batch_size - 1L, n_test)
 
     rows <- seq(start, end)
+
+    if (verbose) {
+      first_or_last <- chunk_i == 1L || chunk_i == n_chunks
+      if (first_or_last || chunk_i %% progress_every == 0L) {
+        cat(sprintf(
+          "%s: chunk %d/%d (obs %d-%d of %d)\n",
+          label, chunk_i, n_chunks, start, end, n_test
+        ))
+      }
+    }
 
     draws <- sample_post(
       input = input[rows, , drop = FALSE],
@@ -287,9 +308,11 @@ probotCRPS <- function(
       col_sds = col_sds,
       col_names = col_names,
       # The sampler chunks internally too; hand it the whole window so that
-      # exactly one chunk of draws is in flight at a time.
+      # exactly one chunk of draws is in flight at a time. That also makes its
+      # own progress reporting a constant "chunk 1/1", so it stays quiet and
+      # the messages above, which know the superset, do the reporting.
       batch_size = length(rows),
-      verbose = verbose
+      verbose = FALSE
     )
 
     # A single-observation window comes back as a matrix; restore the array

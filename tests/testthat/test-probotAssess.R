@@ -422,3 +422,51 @@ test_that("assess functions reject params that disagree with the model", {
     "dimensions"
   )
 })
+
+test_that("verbose progress comes from the outer chunk loop", {
+  s <- setup_flow_assess(n_test = 5, output_dim = 3, n_samples = 32)
+
+  out <- capture.output(
+    res <- probotPIT(s$inp, s$mdl, params = s$params, n_samples = s$n_samples,
+              col_means = s$col_means, col_sds = s$col_sds,
+              batch_size = 2, verbose = TRUE)
+  )
+
+  # Three chunks over five observations, labelled with the calling function and
+  # reporting the superset rather than a local "chunk 1/1".
+  expect_equal(
+    out,
+    c("probotPIT: chunk 1/3 (obs 1-2 of 5)",
+      "probotPIT: chunk 2/3 (obs 3-4 of 5)",
+      "probotPIT: chunk 3/3 (obs 5-5 of 5)")
+  )
+
+  out_crps <- capture.output(
+    res <- probotCRPS(s$inp, s$mdl, params = s$params, n_samples = s$n_samples,
+               col_means = s$col_means, col_sds = s$col_sds,
+               batch_size = 2, verbose = TRUE)
+  )
+  expect_equal(out_crps[1], "probotCRPS: chunk 1/3 (obs 1-2 of 5)")
+
+  out_tarp <- capture.output(
+    res <- probotTARP(s$inp, s$mdl, params = s$params, n_samples = s$n_samples,
+               col_means = s$col_means, col_sds = s$col_sds,
+               batch_size = 2, verbose = TRUE)
+  )
+  expect_equal(out_tarp[1], "probotTARP: chunk 1/3 (obs 1-2 of 5)")
+
+  # Single chunk still reports 1/1 exactly once.
+  out_one <- capture.output(
+    res <- probotPIT(s$inp, s$mdl, params = s$params, n_samples = s$n_samples,
+              col_means = s$col_means, col_sds = s$col_sds,
+              batch_size = 5, verbose = TRUE)
+  )
+  expect_equal(out_one, "probotPIT: chunk 1/1 (obs 1-5 of 5)")
+
+  # verbose = FALSE stays silent.
+  expect_silent(
+    probotPIT(s$inp, s$mdl, params = s$params, n_samples = s$n_samples,
+              col_means = s$col_means, col_sds = s$col_sds,
+              batch_size = 2, verbose = FALSE)
+  )
+})

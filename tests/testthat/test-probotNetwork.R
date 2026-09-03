@@ -113,6 +113,48 @@ test_that("Neural Spline Flow forward and inverse are consistent", {
   expect_equal(as.numeric(rec), as.numeric(theta), tolerance = 1e-4)
 })
 
+test_that("NSF inverse picks the in-bin root when the quadratic coefficient is negative", {
+  # Regression: the spline inverse solves a quadratic and takes the root
+  # 2c / -(b + sqrt(disc)). An earlier version used -(abs(b) + sqrt(disc)),
+  # which silently switches to the *other* root whenever b < 0 -- an order-1
+  # error. b >= 0 for a freshly initialised conditioner, so a round-trip on a
+  # default model passes either way and cannot catch it; scaling the conditioner
+  # weights reaches the trained regime where some b go negative. Run in float64
+  # so the assertion measures root selection rather than float32 conditioning.
+  for (s in c(3, 77)) {
+    torch_manual_seed(s)
+    mdl <- probotFlowNSF(input_dim = 3, output_dim = 6, n_layers = 1,
+                         hidden_dim = 32, n_bins = 8, tail_bound = 3,
+                         device = "cpu")
+    with_no_grad({ for (p in mdl$parameters) p$mul_(2) })
+    mdl$to(dtype = torch_float64())
+    mdl$eval()
+
+    theta <- torch_tensor(matrix(rnorm(200 * 6) * 1.2, ncol = 6),
+                          dtype = torch_float64())
+    x <- torch_tensor(matrix(rnorm(200 * 3), ncol = 3), dtype = torch_float64())
+    err <- as.numeric((mdl$inverse(mdl$forward(theta, x)$z, x) - theta)$abs())
+    expect_lt(max(err), 1e-6)
+  }
+})
+
+test_that("NSF inverse round-trips a realistic trained-conditioner model", {
+  # Wider net, several layers, still float64: catches a regression that only
+  # shows up once the conditioning network is expressive enough to produce
+  # negative b across many bins.
+  torch_manual_seed(2026)
+  mdl <- probotFlowNSF(input_dim = 4, output_dim = 6, n_layers = 3,
+                       hidden_dim = 64, n_bins = 8, tail_bound = 3,
+                       device = "cpu")
+  with_no_grad({ for (p in mdl$parameters) p$mul_(1.5) })
+  mdl$to(dtype = torch_float64())
+  mdl$eval()
+  theta <- torch_tensor(matrix(rnorm(300 * 6) * 1.5, ncol = 6), dtype = torch_float64())
+  x <- torch_tensor(matrix(rnorm(300 * 4), ncol = 4), dtype = torch_float64())
+  err <- as.numeric((mdl$inverse(mdl$forward(theta, x)$z, x) - theta)$abs())
+  expect_lt(max(err), 1e-6)
+})
+
 test_that("Neural Spline Flow has identity tails", {
   # input_dim = 1 (context), output_dim = 2 (parameter space)
   mdl <- probotMakeFlow(1, 2, n_layers = 1, hidden_dim = 8, style = "nsf",

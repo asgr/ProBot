@@ -97,8 +97,12 @@ probotTARP(
     underlying sampler. If \code{NULL} (default) the chunk size is
     chosen automatically to bound memory.}
 
-  \item{verbose}{Logical. If \code{TRUE} (default), forwards progress reporting
-    to the underlying sampler.}
+  \item{verbose}{Logical. If \code{TRUE} (default), print progress for each
+    chunk of observations scored, as
+    \code{probotPIT: chunk i/n (obs a-b of n_test)} (named for the calling
+    function). Progress is reported by the assessment function's own chunk
+    loop, not by the underlying sampler; at most about 20 lines are printed
+    however many chunks there are, plus the first and last.}
 }
 \details{
   \strong{CRPS:} For each test observation \eqn{i} and parameter dimension
@@ -139,8 +143,8 @@ probotTARP(
   Under a well-calibrated posterior, TARP values should be uniformly
   distributed on \eqn{[0, 1]}.
 
-  All three functions sample the first \code{n_test} rows of \code{input} with a
-  single batched call to the sampler that matches \code{model}:
+  All three functions sample the first \code{n_test} rows of \code{input} with
+  the sampler that matches \code{model}:
   \code{\link{probotSamplePostMDN}} for MDNs,
   \code{\link{probotSamplePostNF}} for flows. Sampling proceeds in chunks of
   \code{batch_size} observations, so only one
