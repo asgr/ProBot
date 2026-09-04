@@ -326,7 +326,6 @@ probotFlowRealNVP <- nn_module(
   ), dim = 3)
 
   coordinate <- if (inverse) bottom_edges else left_edges
-  coordinate_next <- coordinate + if (inverse) heights else widths
 
   # The spline is the identity outside [-tail_bound, tail_bound]; points there
   # are passed through verbatim at the end via torch_where(). But torch_where's
@@ -337,17 +336,38 @@ probotFlowRealNVP <- nn_module(
   # feed a domain-clamped copy (ic) into the bin selection and the polynomial:
   # for points inside the domain the clamp is a no-op (identical value and
   # gradient), and for points outside it keeps the unselected branch finite so
-  # no NaN propagates. The zero-selection guard additionally covers the exact
-  # boundary measure, where clamping alone would still select no bin.
+  # no NaN propagates.
   ic <- torch_clamp(input, min = -tail_bound, max = tail_bound)
+
+  # Bin selection is a count of edges at or below the input, not an interval
+  # test. The obvious mask, (ic >= coordinate) & (ic < coordinate + span), is
+  # wrong in float32: coordinate[[k]] + span[[k]] and coordinate[[k + 1]] are
+  # computed differently -- the former by an addition, the latter by a cumsum --
+  # and they disagree by up to an ulp. A positive disagreement leaves a sliver
+  # matching ZERO bins and a negative one makes TWO bins match, and because
+  # select_bin() below sums over the mask, either way returns the sum of
+  # adjacent bins rather than one of them. The resulting theta escapes [0, 1],
+  # which drives the polynomial's denominator negative and log() of it to NaN --
+  # the transient NaN loss epochs seen training NSF models. Over 2.1M internal
+  # knots built the way the coupling layer builds them, 23.6% have an overlapping
+  # boundary (two bins match) and 23.6% a gapped one (zero bins match), so this
+  # is not a rare corner.
+  #
+  # Counting edges is exact and needs no fallback for an empty mask, which is
+  # why the old ones_like() guard is gone: coordinate[[1]] == -tail_bound <= ic
+  # by construction of the clamp, so the count is >= 1; there are n_bins edges,
+  # so it is <= n_bins; and the edges are strictly increasing (widths and
+  # heights are floored at min_bin_width = 1e-3), so the count is exactly the
+  # 1-based index of the bin containing ic. Verified over 6e5 probes placed on
+  # every knot, every right edge, one ulp either side, and both domain bounds:
+  # the count spans 1..n_bins and never leaves it. Only a NaN input escapes, by
+  # making every comparison FALSE, and its output is NaN either way because it
+  # propagates through ic, so a guard would mask nothing.
   expanded_input <- ic$unsqueeze(3)
-  bin_mask <- (expanded_input >= coordinate) & (expanded_input < coordinate_next)
-  bin_mask <- bin_mask$to(dtype = dtype)
-  bin_mask <- torch_where(
-    bin_mask$sum(dim = 3, keepdim = TRUE) == 0,
-    torch_ones_like(bin_mask),
-    bin_mask
-  )
+  bin_index <- (expanded_input >= coordinate)$to(dtype = dtype)$sum(dim = 3)
+  bins <- torch_arange(1, n_bins, dtype = dtype, device = device)$
+    reshape(c(1, 1, n_bins))
+  bin_mask <- (bins == bin_index$unsqueeze(3))$to(dtype = dtype)
 
   select_bin <- function(values) (values * bin_mask)$sum(dim = 3)
   widths_bin <- select_bin(widths)

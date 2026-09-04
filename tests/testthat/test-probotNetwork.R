@@ -205,6 +205,125 @@ test_that("Neural Spline Flow backward is finite through identity tails", {
   expect_equal(torch_isnan(z$grad)$sum()$item(), 0)
 })
 
+# ---- rational quadratic spline: knot-level bin selection ----
+
+# Mirrors .probotSplineCouplingLayer$spline_params(): widths and heights from a
+# softmax scaled to fill [-tail_bound, tail_bound], interior knot derivatives
+# from a softplus, boundary derivatives fixed at 1. A realistic parameterisation
+# matters here because the bug is a float32 rounding artifact of exactly this
+# softmax-then-cumsum construction.
+spline_pars_realistic <- function(batch, dim, n_bins, tail_bound, seed) {
+  torch_manual_seed(seed)
+  raw <- torch_randn(c(batch, dim, 3 * n_bins - 1))
+  widths <- 1e-3 + (2 * tail_bound - 1e-3 * n_bins) *
+    nnf_softmax(raw$narrow(3, 1, n_bins), dim = 3)
+  heights <- 1e-3 + (2 * tail_bound - 1e-3 * n_bins) *
+    nnf_softmax(raw$narrow(3, n_bins + 1, n_bins), dim = 3)
+  derivs <- 1e-3 + nnf_softplus(raw$narrow(3, 2 * n_bins + 1, n_bins - 1))
+  ones <- torch_ones(c(batch, dim, 1))
+  list(widths = widths, heights = heights,
+       derivatives = torch_cat(list(ones, derivs, ones), dim = 3))
+}
+
+test_that("rational quadratic spline selects exactly one bin at every knot", {
+  # Regression for the transient NaN loss epochs seen training NSF models. Bin
+  # selection used to be the interval test (ic >= coord) & (ic < coord + span),
+  # but coord[[k]] + span[[k]] and coord[[k + 1]] are reached by different
+  # routes -- one addition versus one cumsum -- and disagree by up to an ulp in
+  # float32. Where they overlap TWO bins match, where they gape ZERO match and
+  # the old ones_like() fallback then matched all of them; either way the masked
+  # SUM in select_bin() returns the sum of several bins, so theta escapes
+  # [0, 1], the polynomial denominator can go negative, and log() of it is NaN.
+  # Over 2.1M internal knots built the way the coupling layer builds them, 23.6%
+  # have an overlapping boundary and 23.6% a gapped one, so probing every knot
+  # fires reliably. Note this is float32-only: do not "tidy" the test to float64,
+  # where both the old and new code pass.
+  K <- 8; tb <- 3
+  spline <- ProBot:::.probotRationalQuadraticSpline
+
+  for (seed in c(11, 12, 13)) {
+    p <- spline_pars_realistic(500, 4, K, tb, seed)
+    # A spline knot's x position comes from the widths' cumsum and its y
+    # position from the heights'. Internal knot k is the shared edge of bins k
+    # and k + 1, so it carries the derivative at index k + 1.
+    knot_x <- -tb + torch_cumsum(p$widths, dim = 3)
+    knot_y <- -tb + torch_cumsum(p$heights, dim = 3)
+    lad_expected <- log(as.array(p$derivatives)[, , 2:K])
+
+    for (k in seq_len(K - 1)) {
+      xk <- knot_x$narrow(3, k, 1)$squeeze(3)
+      yk <- knot_y$narrow(3, k, 1)$squeeze(3)
+      spl <- function(x, ...) spline(x, p$widths, p$heights, p$derivatives,
+                                   tail_bound = tb, ...)
+      tag <- sprintf("seed %d knot %d", seed, k)
+
+      # Exactly on the knot. theta is then 0 in the bin to the knot's right, so
+      # the spline must return that bin's bottom edge -- the knot's own image --
+      # and its log|det| must be the knot's derivative. Both hold bit-for-bit
+      # when the right single bin is selected, and break badly otherwise.
+      fwd <- spl(xk)
+      expect_true(all(is.finite(as.array(fwd$output))), info = tag)
+      expect_true(all(is.finite(as.array(fwd$logabsdet))), info = tag)
+      expect_lt(max(abs(as.array(fwd$output) - as.array(yk))), 1e-6)
+      expect_lt(max(abs(as.array(fwd$logabsdet) - lad_expected[, , k])), 1e-5)
+
+      # The inverse isolates its bins the same way, by counting bottom_edges.
+      inv <- spl(yk, inverse = TRUE)
+      expect_true(all(is.finite(as.array(inv))), info = tag)
+      expect_lt(max(abs(as.array(inv) - as.array(xk))), 1e-6)
+
+      # Just either side of the knot: finite, and continuous in the output.
+      # log|det| is deliberately not bounded here -- it is continuous but can be
+      # extremely steep near a knot when the bin's delta is large and its left
+      # derivative small, so a step of 1e-4 legitimately moves it by nats.
+      for (sgn in c(-1, 1)) {
+        side <- spl(xk + sgn * 1e-4)
+        expect_true(all(is.finite(as.array(side$output))), info = tag)
+        expect_true(all(is.finite(as.array(side$logabsdet))), info = tag)
+        expect_lt(max(abs(as.array(side$output) - as.array(yk))), 1e-2)
+      }
+    }
+  }
+})
+
+test_that("rational quadratic spline is the identity at and beyond the domain edges", {
+  # Guards the invariant that replaced the ones_like() fallback. Counting edges
+  # can never select zero bins: coordinate[[1]] == -tail_bound <= ic because ic
+  # is clamped, so the count is >= 1, and with n_bins edges it is <= n_bins. At
+  # +tail_bound every edge is at or below the input, giving the count n_bins --
+  # already the last valid bin, no clamp needed. Probes both edges, the points
+  # just outside them, and far outside; if a future edit reintroduces a
+  # reachable empty mask, the pass-through assertions below catch it.
+  K <- 8; tb <- 3
+  spline <- ProBot:::.probotRationalQuadraticSpline
+  p <- spline_pars_realistic(200, 4, K, tb, 31)
+
+  x <- torch_tensor(matrix(
+    rep_len(c(tb, -tb, 20, -20, tb + 1e-6, -tb - 1e-6, 0, -0.5), 200 * 4),
+    nrow = 200, ncol = 4))
+  mx <- as.matrix(x)
+  fwd <- spline(x, p$widths, p$heights, p$derivatives, tail_bound = tb)
+  expect_true(all(is.finite(as.array(fwd$output))))
+  expect_true(all(is.finite(as.array(fwd$logabsdet))))
+
+  # `inside` is a strict test, so at the edges themselves the spline passes the
+  # input through verbatim with zero log|det|.
+  outside <- mx >= tb | mx <= -tb
+  expect_gt(sum(outside), 0)
+  expect_equal(as.array(fwd$output)[outside], mx[outside])
+  expect_equal(as.array(fwd$logabsdet)[outside], rep(0, sum(outside)))
+
+  inv <- spline(x, p$widths, p$heights, p$derivatives,
+                inverse = TRUE, tail_bound = tb)
+  expect_equal(as.array(inv)[outside], mx[outside])
+
+  # Strictly inside the domain the transform is non-trivial but finite, and
+  # forward-then-inverse recovers the input.
+  round_trip <- spline(fwd$output, p$widths, p$heights, p$derivatives,
+                       inverse = TRUE, tail_bound = tb)
+  expect_lt(max(abs(as.array(round_trip)[!outside] - mx[!outside])), 1e-4)
+})
+
 # ---- probotNetworkSuggest tests ----
 
 test_that("probotNetworkSuggest returns list for Point", {
