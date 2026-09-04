@@ -368,7 +368,16 @@ probotFlowRealNVP <- nn_module(
     b <- heights_bin * derivatives_left -
       y_minus_bottom * (derivatives_left + derivatives_right - 2 * delta)
     c <- -delta * y_minus_bottom
-    discriminant <- torch_clamp(b^2 - 4 * a * c, min = 0)
+    # Non-negativity guard on the quadratic's discriminant. torch_relu() rather
+    # than torch_clamp(..., min = 0): the two select identically in the forward
+    # pass, but their backward differs at disc == 0, where sqrt() has infinite
+    # slope. clamp_min's mask is (x >= 0), so it passes that infinity through
+    # and torch_where's grad * 0 on the rejected branch turns it into NaN;
+    # relu's mask is (x > 0), so it zeroes the gradient instead. A strictly
+    # monotone spline has disc > 0 inside every bin, so a trained model never
+    # lands on disc == 0 analytically -- only float rounding gets close, and
+    # only at a knot. The regression test builds the exact-zero case by hand.
+    discriminant <- torch_relu(b^2 - 4 * a * c)
     sqrt_discriminant <- torch_sqrt(discriminant)
     # The root lying inside the bin is 2c / -(b + sqrt(disc)). Wrapping b in
     # torch_abs() here silently switches to the *other* root whenever b < 0 --

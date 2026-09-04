@@ -183,3 +183,220 @@ test_that("probotTrainFlow completes and returns model and history", {
   expect_true(!is.null(res$history))
   expect_true(is.data.frame(res$history))
 })
+
+test_that("probotSingleEpochFlow with lambda = 0 matches the pre-blend behaviour", {
+  # shuffle = FALSE so both loaders see the same batch order; lambda = 0 must
+  # not alter the numerics of a run at all.
+  mk_f <- function() {
+    set.seed(42); torch_manual_seed(42)
+    mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
+    list(
+      m = mdl,
+      d = probotDataLoader(matrix(rnorm(32 * 2), 32, 2),
+                           matrix(rnorm(32 * 4), 32, 4),
+                           batch = 16, shuffle = FALSE, device = "cpu"),
+      o = optim_adam(mdl$parameters, lr = 1e-3)
+    )
+  }
+
+  plain <- mk_f()
+  blended <- mk_f()
+  res_plain <- probotSingleEpochFlow(plain$m, plain$d, plain$o)
+  res_blend <- probotSingleEpochFlow(blended$m, blended$d, blended$o, lambda = 0)
+
+  expect_identical(res_blend$loss, res_plain$loss)
+  expect_equal(
+    lapply(blended$m$parameters, function(p) as.numeric(as.matrix(p))),
+    lapply(plain$m$parameters, function(p) as.numeric(as.matrix(p)))
+  )
+  # mae/rmse are only reported when the MSE term is active
+  expect_named(res_blend, "loss")
+})
+
+test_that("probotSingleEpochFlow lambda > 0 adds differentiable MSE metrics", {
+  for (style in c("realnvp", "maf", "nsf")) {
+    set.seed(42)
+    x <- matrix(rnorm(32 * 2), 32, 2)
+    theta <- matrix(rnorm(32 * 4), 32, 4)
+    mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8,
+                          device = "cpu", style = style)()
+    dl <- probotDataLoader(x, theta, batch = 16, device = "cpu")
+    opt <- optim_adam(mdl$parameters, lr = 1e-3)
+
+    m <- probotSingleEpochFlow(mdl, dl, opt, lambda = 0.5)
+    expect_named(m, c("loss", "mae", "rmse"), info = style)
+    expect_true(all(is.finite(unlist(m))), info = style)
+
+    # The MSE term must actually move parameters: gradients flow through the
+    # inverse map for every style. lambda = 1 means the loss is *purely* the
+    # centre-MSE term, so a style whose inverse broke the autograd graph would
+    # leave every parameter untouched.
+    newm <- function() {
+      torch_manual_seed(99)
+      probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8,
+                     device = "cpu", style = style)()
+    }
+    untouched <- newm()
+    moved <- newm()
+    expect_true(identical(as.numeric(as.matrix(untouched$parameters[[1]])),
+                          as.numeric(as.matrix(moved$parameters[[1]]))))
+    dl2 <- probotDataLoader(x, theta, batch = 32, shuffle = FALSE, device = "cpu")
+    probotSingleEpochFlow(moved, dl2, optim_adam(moved$parameters, lr = 1e-2),
+                          lambda = 1)
+    changed <- vapply(seq_along(moved$parameters), function(i) {
+      a <- as.matrix(untouched$parameters[[i]])
+      b <- as.matrix(moved$parameters[[i]])
+      any(a != b)
+    }, logical(1))
+    expect_true(all(changed), info = style)
+  }
+})
+
+test_that("probotTrainFlow passes lambda through to the epoch function", {
+  set.seed(42)
+  x <- matrix(rnorm(32 * 2), 32, 2)
+  theta <- matrix(rnorm(32 * 4), 32, 4)
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  dl <- probotDataLoader(x, theta, batch = 16, device = "cpu")
+  opt <- optim_adam(mdl$parameters, lr = 1e-3)
+
+  res <- probotTrainFlow(mdl, dl, opt, epochs = 3, lambda = 0.3,
+                         verbose = FALSE, early_stop = FALSE)
+  expect_true(all(c("mae", "rmse") %in% names(res$history)))
+  expect_equal(nrow(res$history), 3)
+})
+
+test_that("probotSingleEpochFlow rejects invalid lambda", {
+  set.seed(42)
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  dl <- probotDataLoader(matrix(rnorm(32 * 2), 32, 2),
+                         matrix(rnorm(32 * 4), 32, 4),
+                         batch = 16, device = "cpu")
+  opt <- optim_adam(mdl$parameters, lr = 1e-3)
+
+  expect_error(probotSingleEpochFlow(mdl, dl, opt, lambda = -0.1), "'lambda'")
+  expect_error(probotSingleEpochFlow(mdl, dl, opt, lambda = 1.5), "'lambda'")
+  expect_error(probotSingleEpochFlow(mdl, dl, opt, lambda = c(0.2, 0.3)), "'lambda'")
+  expect_error(probotSingleEpochFlow(mdl, dl, opt, lambda = NA_real_), "'lambda'")
+})
+
+# --- point estimator -------------------------------------------------------
+test_that(".probotFlowPointEstimate groups draws by observation, not by draw", {
+  # Echo stub: returns the context it was fed. A correct tiling means each
+  # group of n_point_samples rows shares one context row, so the per-group
+  # mean must reproduce the input exactly. A wrong grouping cannot.
+  n_obs <- 4; m <- 5; od <- 3
+  ctx <- torch_tensor(matrix(rnorm(n_obs * od), n_obs, od))
+  seen <- NULL
+  stub <- list(inverse = function(z, x) { seen <<- x; x })
+
+  est <- .probotFlowPointEstimate(stub, ctx, output_dim = od,
+                                  point = "mean", n_point_samples = m)
+  expect_equal(as.matrix(est), as.matrix(ctx), tolerance = 1e-6)
+  expect_equal(est$shape, c(n_obs, od))
+
+  # Negative control: grouping along the other axis must NOT reproduce ctx.
+  wrong <- seen$reshape(c(m, n_obs, od))$mean(dim = 1)
+  expect_false(isTRUE(all.equal(as.matrix(wrong), as.matrix(ctx), tolerance = 1e-6)))
+})
+
+test_that("point = 'centre' matches inlining model$inverse(zeros) directly", {
+  torch_manual_seed(21)
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  ctx <- torch_randn(c(6, 2))
+  direct <- mdl$inverse(torch_zeros(c(6, 4)), ctx)
+  helper <- .probotFlowPointEstimate(mdl, ctx, output_dim = 4, point = "centre")
+  expect_equal(as.matrix(helper), as.matrix(direct), tolerance = 0)
+})
+
+test_that("point = 'mean' converges toward the true posterior mean", {
+  # Skewed target: lognormal in x, so the posterior mean sits well above the
+  # z = 0 centre. The sample mean should be the better estimator of the mean.
+  # output_dim = 2 because the coupling layers reject a 1-D parameter space.
+  set.seed(301); torch_manual_seed(301)
+  n <- 1500; id <- 2; od <- 2
+  Xs <- matrix(rnorm(n * id), n, id)
+  Wm <- matrix(c(0.8, -0.5, 0.3, 0.6), id, od)
+  f <- Xs %*% Wm
+  THs <- exp(f + 0.6 * matrix(rnorm(n * od), n, od))
+  truth <- exp(f + 0.6^2 / 2)
+
+  torch_manual_seed(77)
+  mdl <- probotMakeFlow(id, od, n_layers = 2, hidden_dim = 16, device = "cpu")()
+  dl <- probotDataLoader(Xs, THs, batch = 128, device = "cpu")
+  invisible(probotTrainFlow(mdl, dl, optim_adam(mdl$parameters, lr = 1e-3),
+                            epochs = 30, verbose = FALSE, early_stop = FALSE))
+
+  Xe <- tail(Xs, 300); te <- tail(truth, 300)
+  xt <- torch_tensor(Xe, dtype = torch_float())
+  centre <- as.matrix(with_no_grad(
+    .probotFlowPointEstimate(mdl, xt, od, point = "centre")))
+  mean_est <- as.matrix(with_no_grad(
+    .probotFlowPointEstimate(mdl, xt, od, point = "mean",
+                             n_point_samples = 512)))
+
+  rmse <- function(a) sqrt(mean((a - as.matrix(te))^2))
+  expect_lt(rmse(mean_est), rmse(centre))
+})
+
+test_that("point = 'mean' trains without error for all styles", {
+  for (style in c("realnvp", "maf", "nsf")) {
+    set.seed(42)
+    x <- matrix(rnorm(32 * 2), 32, 2)
+    theta <- matrix(rnorm(32 * 4), 32, 4)
+    mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8,
+                          device = "cpu", style = style)()
+    dl <- probotDataLoader(x, theta, batch = 16, shuffle = FALSE, device = "cpu")
+    opt <- optim_adam(mdl$parameters, lr = 1e-3)
+
+    before <- lapply(mdl$parameters, function(p) as.matrix(p))
+    m <- probotSingleEpochFlow(mdl, dl, opt, lambda = 0.5,
+                               point = "mean", n_point_samples = 8)
+    expect_named(m, c("loss", "mae", "rmse"), info = style)
+    expect_true(all(is.finite(unlist(m))), info = style)
+    # Gradients must flow through the mean-of-draws map, so params move.
+    expect_false(isTRUE(all.equal(before,
+                                  lapply(mdl$parameters, function(p) as.matrix(p)))),
+                 info = style)
+  }
+})
+
+test_that("probotTrainFlow passes point and n_point_samples through", {
+  set.seed(42)
+  x <- matrix(rnorm(32 * 2), 32, 2)
+  theta <- matrix(rnorm(32 * 4), 32, 4)
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  dl <- probotDataLoader(x, theta, batch = 16, device = "cpu")
+  opt <- optim_adam(mdl$parameters, lr = 1e-3)
+
+  res <- probotTrainFlow(mdl, dl, opt, epochs = 2, lambda = 0.5,
+                         point = "mean", n_point_samples = 4,
+                         verbose = FALSE, early_stop = FALSE)
+  expect_true(all(c("mae", "rmse") %in% names(res$history)))
+  expect_error(probotTrainFlow(mdl, dl, opt, epochs = 1, lambda = 0.5,
+                               point = "median", verbose = FALSE))
+  expect_error(probotSingleEpochFlow(mdl, dl, opt, lambda = 0.5, point = "nope"))
+})
+
+test_that("n_point_samples is validated only when it is used", {
+  set.seed(42)
+  x <- matrix(rnorm(32 * 2), 32, 2)
+  theta <- matrix(rnorm(32 * 4), 32, 4)
+  mdl <- probotMakeFlow(2, 4, n_layers = 2, hidden_dim = 8, device = "cpu")()
+  dl <- probotDataLoader(x, theta, batch = 16, device = "cpu")
+  opt <- optim_adam(mdl$parameters, lr = 1e-3)
+
+  # Irrelevant at lambda = 0, so must not error
+  expect_no_error(probotSingleEpochFlow(mdl, dl, opt, lambda = 0,
+                                        n_point_samples = -5))
+  expect_error(probotSingleEpochFlow(mdl, dl, opt, lambda = 0.5,
+                                     n_point_samples = 0), "'n_point_samples'")
+  expect_error(probotSingleEpochFlow(mdl, dl, opt, lambda = 0.5,
+                                     n_point_samples = 2.5), "'n_point_samples'")
+})
+
+test_that("point defaults to centre, keeping prior behaviour", {
+  expect_equal(formals(probotSingleEpochFlow)$point, "centre")
+  expect_equal(formals(probotTrainFlow)$point, "centre")
+  expect_equal(formals(probotTrainFlow)$lambda, 0)
+})
