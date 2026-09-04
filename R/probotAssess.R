@@ -177,8 +177,11 @@ probotCRPS <- function(
 }
 
 # Flow architectures are recognised by their nn_module class names; anything
-# else is treated as an MDN.
-.probotFlowClasses <- c("probotFlowRealNVP", "probotFlowMAF", "probotFlowNSF")
+# else is treated as an MDN. probotFlowLoc wraps one of the three base styles and
+# exposes the same forward()/inverse() contract, so it is dispatched to the flow
+# sampler exactly like them.
+.probotFlowClasses <- c("probotFlowRealNVP", "probotFlowMAF", "probotFlowNSF",
+                        "probotFlowLoc")
 
 .probotIsFlow <- function(model) {
   inherits(model, .probotFlowClasses)

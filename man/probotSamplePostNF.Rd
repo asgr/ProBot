@@ -17,7 +17,8 @@ probotSamplePostNF(
   output_dim = NULL,
   device = NULL,
   batch_size = NULL,
-  verbose = FALSE
+  verbose = FALSE,
+  point_estimate = FALSE
 )
 }
 \arguments{
@@ -53,6 +54,15 @@ probotSamplePostNF(
 
    \item{verbose}{Logical; if \code{TRUE} and processing in multiple chunks,
    print a progress message at regular intervals.}
+
+   \item{point_estimate}{Logical. If \code{TRUE}, return one deterministic
+   point estimate per row of \code{input} instead of drawing samples: the
+   location head \eqn{\mu(x)} for a \code{\link{probotFlowLoc}} model, or the
+   inverse of \code{z = 0} (the base distribution's mode) for a plain flow. One
+   sweep over \code{input}, no \code{n_samples} cost, and the result scales with
+   the number of rows rather than \code{rows * n_samples}. \code{col_means} /
+   \code{col_sds} unscale it as usual; \code{n_samples} and \code{batch_size} are
+   ignored, and \code{verbose} warns if it was set. Defaults to \code{FALSE}.}
 }
 \details{
 The model is set to evaluation mode (\code{model$eval()}) and all
@@ -83,6 +93,11 @@ If \option{input} is a matrix, returns a numeric array of shape
 parameters and \eqn{Nrow} is the number of rows in \option{input}. The
 \code{Sample}, \code{Parameter}, and \code{Observation} dimension names are
 set from \code{col_names} and the row/observation indices if provided.
+
+With \code{point_estimate = TRUE}, a matrix of shape \eqn{Nrow \times D} (or a
+length-\eqn{D} vector when \code{input} is a vector). The single-row and
+multi-row paths use different float32 GEMM kernels, so a one-row result matches
+the corresponding row of a larger batch only to about \eqn{10^{-6}} relative.
 }
 \author{
 Aaron Robotham

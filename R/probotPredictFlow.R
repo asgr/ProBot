@@ -1,3 +1,27 @@
+# Deterministic point estimate for every row of `input`, computed in one pass
+# without drawing any samples. `input` is an already-placed 2-D tensor and
+# means_t/sds_t are the on-device scale vectors built by the caller (or NULL),
+# so nothing here re-derives the device -- that is what keeps a CPU-resident
+# model from being handed MPS tensors, and vice versa. See the `point_estimate`
+# argument of ?probotSamplePostNF for which value is returned.
+.probotFlowPointSummary <- function(input, model, output_dim, means_t, sds_t,
+                                    col_names) {
+  # The head, when there is one; otherwise the base distribution's mode.
+  point <- if (inherits(model, "probotFlowLoc")) "loc" else "centre"
+
+  with_no_grad({
+    est <- .probotFlowPointEstimate(model, context = input,
+                                    output_dim = output_dim, point = point)
+    # 1-D (output_dim) vectors broadcast across rows, matching the sampler's
+    # own unscaling line.
+    if (!is.null(means_t)) est <- est * sds_t + means_t
+  })
+
+  m <- as.matrix(est$cpu())
+  dimnames(m) <- list(NULL, col_names)
+  if (nrow(m) == 1L) as.vector(m) else m
+}
+
 probotSamplePostNF <- function(input,
                                model,
                                n_samples = 5000,
@@ -7,7 +31,8 @@ probotSamplePostNF <- function(input,
                                output_dim = NULL,
                                device = NULL,
                                batch_size = NULL,
-                               verbose = FALSE) {
+                               verbose = FALSE,
+                               point_estimate = FALSE) {
   # ------------------------------------------------------------------
   # Determine parameter dimensionality
   # ------------------------------------------------------------------
@@ -72,6 +97,32 @@ probotSamplePostNF <- function(input,
 
   if (input$dim() == 1L) {
     input <- input$unsqueeze(1)
+  }
+
+  # ------------------------------------------------------------------
+  # POINT ESTIMATE (no sampling)
+  #
+  # For a residual location-head flow this returns mu(x), the head's own
+  # output: deterministic, exact, and the thing the head was trained to
+  # predict. For a plain flow there is no head, so the inverse of z = 0
+  # (the base distribution's mode) is the closest analogue. Both cost a
+  # single sweep, which is why this lives here rather than in its own
+  # function. Dispatched after the device and scale tensors are resolved
+  # so it cannot disagree with the model about where tensors live.
+  # ------------------------------------------------------------------
+
+  if (isTRUE(point_estimate)) {
+    if (input$dim() != 2L) {
+      stop("'input' must be either a vector or a matrix")
+    }
+    if (isTRUE(verbose)) {
+      warning("point_estimate = TRUE returns one value per row, so 'verbose' ",
+              "(chunk progress for sampling) is ignored.", call. = FALSE)
+    }
+    return(.probotFlowPointSummary(input = input, model = model,
+                                   output_dim = output_dim,
+                                   means_t = means_t, sds_t = sds_t,
+                                   col_names = col_names))
   }
 
   # ------------------------------------------------------------------

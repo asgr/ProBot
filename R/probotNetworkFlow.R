@@ -577,16 +577,111 @@ probotFlowMAF <- nn_module(
   }
 )
 
+# ---------------------------------------------------------------------------
+# Residual location head
+# ---------------------------------------------------------------------------
+
+# Wraps any of the three flow styles as
+#     theta = mu(x) + f_inverse(z, x),   z ~ N(0, I)
+# so the network's explicit regression output is the posterior *location* and
+# the flow only has to model the residual.
+#
+# The change of variables costs nothing: z = f_forward(theta - mu(x), x) and
+# d(theta - mu)/d(theta) is the identity, so the base flow's log_det_jac is
+# already log|det dz/dtheta| exactly. No extra term, no new base distribution,
+# and the NLL stays exact -- which is the whole point of using a *residual
+# shift* rather than a mixture-of-flows.
+#
+# What the head buys is credit assignment, not expressiveness. Every conditioner
+# here already sees x, so a plain flow can in principle represent any conditional
+# shift; what it lacks is a parameter set whose sole job is that shift, and hence
+# a gradient path that lands directly on it. That is why the head is only worth
+# its parameters alongside an explicit point-estimate term: see `lambda` and
+# `point = "loc"` in ?probotTrainFlow. With lambda = 0 the split between head and
+# flow is chosen arbitrarily by the NLL optimiser.
+probotFlowLoc <- nn_module(
+  "probotFlowLoc",
+  initialize = function(base_flow, input_dim, output_dim,
+                        loc_hidden_dims = c(128, 128), device = NULL) {
+    self$base_flow <- base_flow
+    # Store every constructor argument on self: forward()/location() run in a
+    # restored function environment at package load, where a lexical reference
+    # to an argument is not guaranteed to resolve.
+    self$input_dim <- input_dim
+    self$output_dim <- output_dim
+    self$loc_hidden_dims <- as.integer(loc_hidden_dims)
+
+    dims <- c(as.integer(input_dim), self$loc_hidden_dims, as.integer(output_dim))
+    layers <- vector("list", length(dims) - 1L)
+    for (i in seq_along(layers)) {
+      layers[[i]] <- nn_linear(dims[i], dims[i + 1L])
+    }
+    self$loc_layers <- nn_module_list(layers)
+    self$n_loc_layers <- length(layers)
+
+    self$to(device = .probotChooseDevice(device))
+  },
+
+  # Deterministic location mu(x). Public because the trainer and the assessment
+  # functions both want to read it without re-running the inverse map.
+  location = function(x) {
+    h <- x
+    for (i in seq_len(self$n_loc_layers - 1L)) {
+      h <- nnf_gelu(self$loc_layers[[i]](h))
+    }
+    self$loc_layers[[self$n_loc_layers]](h)
+  },
+
+  forward = function(theta, x) {
+    mu <- self$location(x)
+    out <- self$base_flow$forward(theta - mu, x)
+    # The residual shift is volume-preserving in theta, so the base flow's
+    # log-det needs no correction; z, log_det_jac have the same meaning as for
+    # the unheaded flow and probotLossNF() works unchanged.
+    list(z = out$z, log_det_jac = out$log_det_jac)
+  },
+
+  inverse = function(z, x) {
+    mu <- self$location(x)
+    self$base_flow$inverse(z, x) + mu
+  }
+)
+
+# Unwrap nested location heads and name the flow style underneath, so
+# probotSave() records the right style for a wrapped model (class() of the
+# wrapper is "probotFlowLoc", which matches none of the style patterns).
+.probotFlowStyleName <- function(model) {
+  depth <- 0L
+  while (inherits(model, "probotFlowLoc")) {
+    model <- model$base_flow
+    depth <- depth + 1L
+    if (depth > 10L) {
+      stop("Encountered more than 10 nested 'probotFlowLoc' wrappers",
+           call. = FALSE)
+    }
+  }
+  if (any(grepl("MAF", class(model)))) {
+    "maf"
+  } else if (any(grepl("NSF", class(model)))) {
+    "nsf"
+  } else {
+    "realnvp"
+  }
+}
+
 probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
                            n_blocks = NULL, n_layers_per_block = 2,
                            soft_clamp = 3, device = NULL, style = "realnvp",
-                           n_bins = 8, tail_bound = 3, ...) {
+                           n_bins = 8, tail_bound = 3,
+                           loc_head = FALSE,
+                           loc_hidden_dims = c(128, 128), ...) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
   # Disambiguates the available flow architectures:
   #   style = "realnvp" -> stacked affine RealNVP layers (default)
   #   style = "maf"     -> masked autoregressive blocks + permutation layers
   #   style = "nsf"     -> stacked rational-quadratic spline coupling layers
+  # loc_head = TRUE wraps the result in probotFlowLoc().
   match.arg(style, c("realnvp", "maf", "nsf"))
 
   # Depth for style = "maf" is expressed in blocks, but probotNetworkSuggest()
@@ -595,10 +690,10 @@ probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
   # an explicit n_blocks still wins.
   maf_blocks <- if (!is.null(n_blocks)) n_blocks else n_layers
 
-  output = function() {
+  output <- function() {
     # Calling a named nn_module with its constructor args already returns an
     # instantiated module, so no trailing `()` is added here.
-    switch(style,
+    base <- switch(style,
            realnvp = probotFlowRealNVP(
              input_dim = input_dim, output_dim = output_dim, n_layers = n_layers,
              hidden_dim = hidden_dim, soft_clamp = soft_clamp, device = device
@@ -616,6 +711,15 @@ probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
              device = device
            )
     )
+
+    if (isTRUE(loc_head)) {
+      base <- probotFlowLoc(
+        base_flow = base, input_dim = input_dim, output_dim = output_dim,
+        loc_hidden_dims = loc_hidden_dims, device = device
+      )
+    }
+
+    base
   }
   # Return the zero-arg constructor itself, matching probotMakeMDN()/
   # probotMakePoint() and the `probotMakeX(...)()` call pattern used by

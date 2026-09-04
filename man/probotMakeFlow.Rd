@@ -15,7 +15,8 @@ comparison and guidance on choosing between them.
 \usage{
 probotMakeFlow(input_dim, output_dim,
   n_layers = 4, hidden_dim = 32, n_blocks = NULL, n_layers_per_block = 2,
-  soft_clamp = 3, device = NULL, style = "realnvp", n_bins = 8, tail_bound = 3
+  soft_clamp = 3, device = NULL, style = "realnvp", n_bins = 8, tail_bound = 3,
+  loc_head = FALSE, loc_hidden_dims = c(128, 128)
 )
 }
 \arguments{
@@ -63,6 +64,17 @@ probotMakeFlow(input_dim, output_dim,
     \code{"nsf"} (rational-quadratic spline coupling layers). Determines
     which module is returned: \code{\link{probotFlowRealNVP}},
     \code{\link{probotFlowMAF}}, or \code{\link{probotFlowNSF}}.}
+
+    \item{loc_head}{Logical. If \code{TRUE}, the selected flow is wrapped in
+    \code{\link{probotFlowLoc}}, a residual location head that models
+    \eqn{\theta = \mu(x) + f^{-1}(z, x)} so an explicit regression network
+    carries the posterior \emph{location} and the flow models only the
+    residual. Combine with \code{lambda > 0} and \code{point = "loc"} in
+    \code{\link{probotTrainFlow}}. Defaults to \code{FALSE}.}
+
+    \item{loc_hidden_dims}{Numeric vector of hidden widths for the location
+    head's MLP, used only when \code{loc_head = TRUE}. Defaults to
+    \code{c(128, 128)}.}
 }
 \details{
 \code{probotMakeFlow()} is a facade: it returns a zero-argument constructor

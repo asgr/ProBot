@@ -34,16 +34,18 @@ probotSave <- function(
 
   # For flow models, record which architecture the checkpoint holds so
   # probotLoad() can reconstruct the correct skeleton. Infer it from the
-  # model's class when not given explicitly.
+  # model's class when not given explicitly. A location-head wrapper is
+  # unwrapped to name the style underneath, and the head itself is recorded
+  # separately -- class(probotFlowLoc) matches none of the style patterns.
+  loc_head <- FALSE
+  loc_hidden_dims <- NULL
   if (model_type == "flow") {
+    if (inherits(model, "probotFlowLoc")) {
+      loc_head <- TRUE
+      loc_hidden_dims <- model$loc_hidden_dims
+    }
     if (is.null(flow_style)) {
-      flow_style <- if (any(grepl("MAF", class(model)))) {
-        "maf"
-      } else if (any(grepl("NSF", class(model)))) {
-        "nsf"
-      } else {
-        "realnvp"
-      }
+      flow_style <- .probotFlowStyleName(model)
     } else {
       flow_style <- match.arg(tolower(flow_style), c("realnvp", "maf", "nsf"))
     }
@@ -89,6 +91,8 @@ probotSave <- function(
       dropout         = dropout,
       soft_clamp      = soft_clamp,
       flow_style      = flow_style,
+      loc_head        = if (model_type == "flow" && loc_head) TRUE else NULL,
+      loc_hidden_dims = if (model_type == "flow" && loc_head) loc_hidden_dims else NULL,
       col_means       = col_means,
       col_sds         = col_sds,
       col_names       = col_names,
@@ -258,6 +262,13 @@ probotLoad <- function(filename, load_optimizer = FALSE, device = NULL, flow_sty
       # Priority: explicit override > saved metadata > "realnvp" (legacy default).
       style       = if (!is.null(flow_style)) flow_style else
                     if (!is.null(meta$flow_style)) meta$flow_style else "realnvp",
+      # Absent in checkpoints saved before the location head existed, which is
+      # exactly the FALSE default. The state_dict key namespaces differ between
+      # headed and plain flows ("base_flow." prefix), so a wrong guess here
+      # fails the strict load below rather than silently mis-reconstructing.
+      loc_head    = isTRUE(meta$loc_head),
+      loc_hidden_dims = if (!is.null(meta$loc_hidden_dims)) meta$loc_hidden_dims
+                        else c(128, 128),
       device      = device
     )()
   )

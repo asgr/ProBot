@@ -34,8 +34,10 @@ probotTrainFlow(model, dataloader, optimizer, epochs = 100,
   \item{point}{Which point estimate the MSE term regresses against, when
   \code{lambda > 0}: \code{"centre"} (the default) uses the deterministic
   inverse of the base distribution's mode, \code{"mean"} uses the average of
-  \code{n_point_samples} posterior draws. Ignored when \code{lambda = 0}. See
-  \bold{Point estimators} below.}
+  \code{n_point_samples} posterior draws, and \code{"loc"} uses the location
+  head of a \code{\link{probotFlowLoc}} model (built with
+  \code{loc_head = TRUE} in \code{\link{probotMakeFlow}}). Ignored when
+  \code{lambda = 0}. See \bold{Point estimators} below.}
 
   \item{n_point_samples}{Number of inverse draws averaged when
   \code{point = "mean"}. Must be a whole number of at least 1, and is only
@@ -106,6 +108,14 @@ do with the fitted model.
   centre a poor summary. The cost is Monte-Carlo noise: both the estimate and
   its gradient fluctuate from batch to batch, and the whole blend becomes
   stochastic.
+  \item \code{"loc"} returns \code{model$location(x)}, the location head of a
+  \code{\link{probotFlowLoc}} model. It requires \code{loc_head = TRUE} and
+  errors otherwise. This is the cheapest and least noisy of the three: no
+  inverse sweep, no Monte-Carlo noise, and the gradient reaches the head
+  directly instead of through the shared conditioner. Whether \code{mu(x)} is a
+  good summary of the posterior is then the flow's responsibility -- the NLL
+  term is what makes the residual carry the mass, so \code{"loc"} is meant to be
+  used with a \code{lambda} small enough that the likelihood still dominates.
 }
 
 \code{point = "mean"} draws are batched into a single inverse call with each

@@ -11,6 +11,11 @@
 # as many inverse sweeps, and carries Monte-Carlo noise in both the estimate and
 # its gradient.
 #
+# "loc" returns the head of a residual location-head flow (probotFlowLoc):
+# mu(x) directly, with no inverse sweep at all and hence no MC noise and no
+# Jacobian-weighting bias. Only available for that architecture, and there is
+# nothing to estimate for the plain flows.
+#
 # Draws for all rows are stacked into a single (n_obs * m, output_dim) inverse
 # call rather than looping, which is what makes the cost tolerable for the
 # coupling styles. The reshape back to (n_obs, m, output_dim) must match the
@@ -21,7 +26,15 @@
                                      output_dim,
                                      point = "centre",
                                      n_point_samples = 32) {
-  point <- match.arg(point, choices = c("centre", "mean"))
+  point <- match.arg(point, choices = c("centre", "mean", "loc"))
+
+  if (point == "loc") {
+    if (!inherits(model, "probotFlowLoc")) {
+      stop("'point = \"loc\"' requires a flow built with loc_head = TRUE; ",
+           "this model has no location head.", call. = FALSE)
+    }
+    return(model$location(context))
+  }
 
   if (point == "centre") {
     z <- torch_zeros(c(context$size(1), output_dim),
@@ -59,7 +72,7 @@ probotSingleEpochFlow <- function(model,
     stop("'lambda' must be a single number in [0, 1]", call. = FALSE)
   }
 
-  point <- match.arg(point, choices = c("centre", "mean"))
+  point <- match.arg(point, choices = c("centre", "mean", "loc"))
 
   if (lambda > 0) {
     if (!is.numeric(n_point_samples) || length(n_point_samples) != 1L ||
@@ -150,7 +163,7 @@ probotTrainFlow <- function(model,
                                   stop_window = 20,
                                   stop_delta = 1e-2) {
   # Resolve here too so a typo fails immediately rather than inside the loop.
-  point <- match.arg(point, choices = c("centre", "mean"))
+  point <- match.arg(point, choices = c("centre", "mean", "loc"))
 
   .probotTrainLoop(
     train_fn = probotSingleEpochFlow,
