@@ -8,12 +8,13 @@ optional early stopping and checkpoint saving.
 }
 \usage{
 probotSingleEpochFlow(model, dataloader, optimizer, loss_fn = probotLossNF,
-  lambda = 0)
+  lambda = 0, point = "centre", n_point_samples = 32)
 
 probotTrainFlow(model, dataloader, optimizer, epochs = 100,
-  loss_fn = probotLossNF, lambda = 0, checkpoint_dir = NULL,
-  checkpoint_every = 10, history = NULL, verbose = TRUE, early_stop = TRUE,
-  stop_window = 20, stop_delta = 1e-2)
+  loss_fn = probotLossNF, lambda = 0, point = "centre",
+  n_point_samples = 32, checkpoint_dir = NULL, checkpoint_every = 10,
+  history = NULL, verbose = TRUE, early_stop = TRUE, stop_window = 20,
+  stop_delta = 1e-2)
 }
 \arguments{
   \item{model}{Instantiated torch module returned by \code{probotMakeFlow(... )()}.}
