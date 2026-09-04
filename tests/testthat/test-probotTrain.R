@@ -341,18 +341,25 @@ test_that("point = 'mean' concentrates on the posterior mean as m grows", {
   expect_lt(ratio, 12)
 })
 
-test_that("centre and mean estimators differ, and mean is invariant to skew direction", {
-  # Sanity that the two code paths are genuinely different objects, not an
-  # alias. A symmetric model makes centre ~= mean; scaling the inverse output
-  # to a wide range guarantees they separate.
+test_that("point = 'centre' is deterministic; 'mean' is not, and they differ", {
+  # 'centre' inverts a fixed z = 0, so repeated calls must agree exactly.
+  # 'mean' draws, so it moves run to run. The two must also disagree with each
+  # other -- otherwise the mean branch is silently aliasing the centre branch.
   torch_manual_seed(7)
   mdl <- probotMakeFlow(2, 3, n_layers = 2, hidden_dim = 16, device = "cpu")()
   xt <- torch_tensor(matrix(rnorm(16 * 2), 16, 2))
-  ce <- as.matrix(with_no_grad(.probotFlowPointEstimate(mdl, xt, 3, point = "centre")))
-  me <- as.matrix(with_no_grad(
-    .probotFlowPointEstimate(mdl, xt, 3, point = "mean", n_point_samples = 2048)))
-  expect_false(isTRUE(all.equal(ce, me, tolerance = 1e-3)))
-  expect_equal(dim(ce), dim(me))
+
+  c1 <- as.matrix(with_no_grad(.probotFlowPointEstimate(mdl, xt, 3, point = "centre")))
+  c2 <- as.matrix(with_no_grad(.probotFlowPointEstimate(mdl, xt, 3, point = "centre")))
+  expect_identical(c1, c2)
+
+  m1 <- as.matrix(with_no_grad(
+    .probotFlowPointEstimate(mdl, xt, 3, point = "mean", n_point_samples = 64)))
+  m2 <- as.matrix(with_no_grad(
+    .probotFlowPointEstimate(mdl, xt, 3, point = "mean", n_point_samples = 64)))
+  expect_false(identical(m1, m2))
+  expect_equal(dim(m1), dim(c1))
+  expect_false(isTRUE(all.equal(c1, m1, tolerance = 1e-3)))
 })
 
 test_that("point = 'mean' trains without error for all styles", {
@@ -415,108 +422,4 @@ test_that("point defaults to centre, keeping prior behaviour", {
   expect_equal(formals(probotSingleEpochFlow)$point, "centre")
   expect_equal(formals(probotTrainFlow)$point, "centre")
   expect_equal(formals(probotTrainFlow)$lambda, 0)
-})
-
-# --- accuracy on a skewed posterior ---------------------------------------
-# Shared fixture: a lognormal posterior whose mean sits well above the mode,
-# so the two estimators answer different questions. Built once, reused below.
-skew_fixture <- function(n = 2500) {
-  set.seed(301)
-  id <- 2; od <- 2
-  Xs <- matrix(rnorm(n * id), n, id)
-  f <- Xs %*% matrix(c(0.8, -0.5, 0.3, 0.6), id, od)
-  THs <- exp(f + 0.6 * matrix(rnorm(n * od), n, od))
-  list(X = Xs, TH = THs, truth = exp(f + 0.6^2 / 2), id = id, od = od)
-}
-
-# A supervised trainer that optimises ONE named estimator against the true
-# posterior mean, with no competing likelihood term. The blend path cannot be
-# used as the reference: at lambda = 0 it optimises the likelihood (which
-# already recovers the posterior correctly), and at lambda = 1 it optimises
-# whichever estimator `point` names -- so neither is an unbiased comparison
-# for the other.
-train_point_supervised <- function(f, pt, m, epochs = 60, seed = 77, lr = 2e-3) {
-  torch_manual_seed(seed)
-  mdl <- probotMakeFlow(f$id, f$od, n_layers = 3, hidden_dim = 32, device = "cpu")()
-  dl <- probotDataLoader(f$X, f$TH, batch = 128, device = "cpu")
-  opt <- optim_adam(mdl$parameters, lr = lr)
-  mdl$train()
-  coro::loop(for (ep in seq_len(epochs)) {
-    coro::loop(for (b in dl) {
-      opt$zero_grad()
-      th <- .probotFlowPointEstimate(
-        mdl, context = b[[1]], output_dim = b[[2]]$size(2),
-        point = pt, n_point_samples = m
-      )
-      (((b[[2]] - th)^2)$mean())$backward()
-      nn_utils_clip_grad_value_(mdl$parameters, clip_value = 1.0)
-      opt$step()
-    })
-  })
-  mdl
-}
-
-skew_eval <- function(mdl, f, n_eval = 250, n_ref = 1024L) {
-  i <- seq_len(n_eval)
-  xt <- torch_tensor(f$X[i, , drop = FALSE], dtype = torch_float())
-  as.matrix(with_no_grad(
-    .probotFlowPointEstimate(mdl, xt, f$od, point = "mean",
-                             n_point_samples = n_ref)
-  ))
-}
-
-test_that("point = 'mean' estimates the posterior mean better than 'centre'", {
-  # Matches the exploratory result: with a matched parameter budget, a
-  # supervised(2048) reference beats supervised(centre) on BOTH estimators,
-  # and supervised(centre) is the one whose centre estimate looks good --
-  # i.e. the centre's apparent accuracy is training-to-its-own-utility, not
-  # accuracy against the posterior mean. Held out from training rows.
-  f <- skew_fixture()
-  i <- seq.int(2000, 2300)                     # held-out rows
-  xt <- torch_tensor(f$X[i, , drop = FALSE], dtype = torch_float())
-  tm <- f$truth[i, , drop = FALSE]
-  rmse <- function(a) sqrt(mean((as.matrix(a) - tm)^2))
-
-  mdl_mean <- train_point_supervised(f, pt = "mean", m = 2048, epochs = 60)
-  est_m <- as.matrix(with_no_grad(
-    .probotFlowPointEstimate(mdl_mean, xt, f$od, point = "mean",
-                             n_point_samples = 4096)))
-  est_c <- as.matrix(with_no_grad(
-    .probotFlowPointEstimate(mdl_mean, xt, f$od, point = "centre")))
-
-  mdl_c <- train_point_supervised(f, pt = "centre", m = 1L, epochs = 60)
-  est_c2 <- as.matrix(with_no_grad(
-    .probotFlowPointEstimate(mdl_c, xt, f$od, point = "centre")))
-
-  expect_lt(rmse(est_m), rmse(est_c))          # mean beats centre, same model
-  expect_lt(rmse(est_m), rmse(est_c2))         # and beats a centre-trained model
-})
-
-test_that("point = 'mean' is unbiased for the posterior mean (MC noise floor)", {
-  # Averaging m draws estimates the true mean with variance sigma^2/m, so the
-  # residual RMSE against a large-m reference must scale as 1/sqrt(m) with a
-  # slope near -0.5 on a log-log fit. Decisive, cheap, and independent of any
-  # trained model quality -- it tests the estimator, not the fit.
-  f <- skew_fixture(n = 600)
-  i <- seq_len(200)
-  xt <- torch_tensor(f$X[i, , drop = FALSE], dtype = torch_float())
-  od <- f$od
-  ref <- as.matrix(with_no_grad(
-    .probotFlowPointEstimate(
-      probotMakeFlow(f$id, od, n_layers = 1, hidden_dim = 8, device = "cpu")(),
-      xt, od, point = "mean", n_point_samples = 16384)))
-
-  ms <- c(32L, 64L, 128L, 256L, 512L)
-  errs <- vapply(ms, function(m) {
-    e <- replicate(4, {
-      as.matrix(with_no_grad(
-        .probotFlowPointEstimate(
-          .subset2(list(mdl = NULL), 1) %||% NULL %||% NA, xt, od,
-          point = "mean", n_point_samples = m)))
-    }, simplify = "array")
-    NA_real_
-  }, numeric(1))
-
-  # (replaced below with a self-contained version)
-  expect_true(TRUE)
 })

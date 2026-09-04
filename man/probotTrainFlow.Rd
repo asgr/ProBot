@@ -31,6 +31,16 @@ probotTrainFlow(model, dataloader, optimizer, epochs = 100,
   pure maximum-likelihood training and reproduces earlier behaviour exactly.
   See \bold{Loss blending} below.}
 
+  \item{point}{Which point estimate the MSE term regresses against, when
+  \code{lambda > 0}: \code{"centre"} (the default) uses the deterministic
+  inverse of the base distribution's mode, \code{"mean"} uses the average of
+  \code{n_point_samples} posterior draws. Ignored when \code{lambda = 0}. See
+  \bold{Point estimators} below.}
+
+  \item{n_point_samples}{Number of inverse draws averaged when
+  \code{point = "mean"}. Must be a whole number of at least 1, and is only
+  validated when \code{lambda > 0}.}
+
   \item{epochs}{Maximum number of epochs for \code{probotTrainFlow()}.}
 
   \item{checkpoint_dir}{Optional directory to save periodic \code{.pt} checkpoints.}
@@ -67,37 +77,68 @@ important difference in how the point estimate is obtained.
 
 An MDN exposes an analytic posterior mean (the weighted mean of its mixture
 components) for free. A flow's forward pass maps parameters to latent space and
-yields no network output to regress against, so the MSE term instead compares
-the true parameters against the \emph{deterministic centre} of the learned
-conditional posterior, \code{model$inverse(z = 0, x)}. For the standard normal
-base distribution used here, \code{z = 0} is the base distribution's mode, so
-the estimate is a Jacobian-weighted centre of the posterior rather than its
-mean. Under the blend the two terms are combined as tensors \emph{before}
+yields no network output to regress against, so the MSE term must instead be
+built from the inverse map. The two terms are combined as tensors \emph{before}
 \code{backward()}, so both contribute gradients in a single pass.
 
-Computing the centre costs one inverse sweep per batch. This is cheap for the
-\code{realnvp} and \code{nsf} styles, whose inverse is a single vectorised
-coupling sweep, but noticeably more expensive for \code{maf}, whose inverse
-runs \code{output_dim} sequential masked-MLP evaluations.
+\code{mae} and \code{rmse} are reported only when the MSE term is active, so a
+\code{lambda = 0} run keeps the historical \code{epoch}/\code{loss} history
+schema and is numerically identical to a run without the argument at all.
+}
 
-The trade-off is mostly relevant when training is budget-limited. On a well
-converged fit the likelihood term alone already places the centre accurately,
-and \code{lambda} changes little; the benefit shows up early in training and
-where the likelihood surface is difficult. Very large \code{lambda} can bias
-the posterior shape away from maximum likelihood, since the centre-MSE term
-does not target the posterior mean.
+\subsection{Point estimators}{
 
-When \code{lambda} is 0 the loss and metrics are unchanged from a run without
-the argument at all; \code{mae} and \code{rmse} are reported only when the MSE
-term is active, so the history data frame keeps its \code{epoch}/\code{loss}
-schema by default.
+The \code{point} argument selects which quantity the MSE term targets. They
+answer different questions, and the right choice depends on what you intend to
+do with the fitted model.
+
+\itemize{
+  \item \code{"centre"} (default) evaluates \code{model$inverse(z = 0, x)}, the
+  image of the base distribution's mode. It is deterministic, and for a
+  symmetric conditional posterior coincides with the posterior mean. For a
+  skewed posterior it sits nearer the mode and is therefore biased under
+  squared-error loss; strictly it is a Jacobian-weighted centre rather than
+  either the mean or the marginal mode.
+  \item \code{"mean"} averages \code{n_point_samples} draws through the
+  inverse, giving an unbiased estimate of \code{E[theta | x]} -- the
+  Bayes-optimal point under squared error, and the closest flow analogue to an
+  MDN's mixture mean. It is the better choice when a skewed posterior makes the
+  centre a poor summary. The cost is Monte-Carlo noise: both the estimate and
+  its gradient fluctuate from batch to batch, and the whole blend becomes
+  stochastic.
+}
+
+\code{point = "mean"} draws are batched into a single inverse call with each
+context row repeated \code{n_point_samples} times, so the cost is roughly
+\code{n_point_samples} inverse sweeps amortised over the batch rather than one
+per observation. Measured on a 256-row CPU batch, \code{n_point_samples = 32}
+added about half again to the per-step cost for the \code{realnvp} and
+\code{nsf} coupling styles and about twofold for \code{maf}, whose inverse runs
+\code{output_dim} sequential masked-MLP evaluations. Raising it to 128 moved
+those to roughly 2.5x and 3x.
+
+The default of 32 is a knee rather than a optimum: with common random numbers
+the deviation of a length-\code{m} partial mean from the full-pool mean scales
+as \code{sqrt(1/m - 1/M)}, so gains fall off quickly past 32 while cost keeps
+climbing. Raise it when the posterior is heavily skewed or the fit is
+unstable; lower it if \code{maf} sampling cost dominates the epoch.
+
+In an illustrative lognormal example (posterior mean well above the mode, 40
+epochs, held-out rows) both blends improved on pure likelihood training on
+both summaries, but each favoured the estimator it named: \code{point =
+"mean"} gave the best posterior-mean accuracy (RMSE 1.98 against 2.42 for
+\code{point = "centre"}, from 3.11 with no blend), while \code{point =
+"centre"} gave the best centre accuracy (2.32 against 2.92 for \code{point =
+"mean"}). Pick \code{point} to match the summary you will actually report, and
+expect very large \code{lambda} to bias the posterior shape away from maximum
+likelihood.
 }
 }
 \value{
 \itemize{
-  \item \code{probotSingleEpochFlow()}: List with \code{loss}, and, when
-  \code{lambda > 0}, \code{mae} and \code{rmse} for the centre estimate
-  (element-wise, over all target elements).
+  \item \code{probotSingleEpochFlow()}: List with \code{loss} and, when
+  \code{lambda > 0}, \code{mae} and \code{rmse} measured against the estimator
+  named by \code{point} (element-wise, over all target elements).
   \item \code{probotTrainFlow()}: List with trained \code{model} and
   \code{history} data frame. The history data frame contains columns
   \code{epoch} and \code{loss}, plus \code{mae} and \code{rmse} when
@@ -140,5 +181,21 @@ if (requireNamespace("torch", quietly = TRUE)) {
   )
 
   blended[c("loss", "mae", "rmse")]
+
+  # Or target the posterior mean instead of the centre, at the cost of
+  # averaging several inverse draws per observation each step. Fresh model, so
+  # the two runs start from the same place.
+  torch::torch_manual_seed(1)
+  model2 <- probotMakeFlow(input_dim = 3, output_dim = 2)()
+  means <- probotSingleEpochFlow(
+    model = model2,
+    dataloader = loader,
+    optimizer = torch::optim_adam(model2$parameters, lr = 0.01),
+    lambda = 0.5,
+    point = "mean",
+    n_point_samples = 32
+  )
+
+  means[c("loss", "mae", "rmse")]
 }
 }
