@@ -47,10 +47,18 @@ probotSamplePostNF(
    which auto-detects from the model's parameters.}
 
    \item{batch_size}{Number of observations processed per chunk in multi-observation
-   mode. If \code{NULL} (default), it is chosen automatically so that roughly
-   \code{2e6} rows (\code{batch_size * n_samples}) of latent space are held in
-   memory at once. Lower this on machines with less RAM, or raise it if more
-   headroom is available. Ignored in single-observation mode.}
+   mode. If \code{NULL} (default), it is chosen automatically from a memory
+   budget: the inverse pass holds \code{batch_size * n_samples} rows, and each
+   row additionally materialises one \code{hidden_dim}-wide activation per flow
+   layer, so the automatic size is the smaller of \code{2e6 / n_samples} draw
+   rows and the number of rows whose conditioner activations fit in memory (see
+   \strong{Memory} below). An explicit \code{batch_size} is honoured unless it
+   would exceed that budget, in which case it is reduced to the safe value with
+   a warning. Because the posterior draws come from one random sweep per chunk,
+   the chunk size affects the random stream: lowering \code{batch_size} below
+   the budget does not merely slow sampling down, it changes the samples. In
+   single-observation mode \code{n_samples} is the chunk axis, so the budget
+   applies to \code{n_samples} directly and this argument is ignored.}
 
    \item{verbose}{Logical; if \code{TRUE} and processing in multiple chunks,
    print a progress message at regular intervals.}
@@ -83,6 +91,20 @@ In multi-observation mode, observations are processed in chunks of
 (millions of observations) can be handled without exhausting memory. Only the
 accumulated output array and one chunk of intermediate tensors are held at a
 time.
+
+\strong{Memory.} The dominant allocation during sampling is not the
+\code{(n_samples x D)} output but the conditioner activations inside the
+inverse pass, which are \code{(batch_size * n_samples) x hidden_dim}
+floats wide for every flow layer. A \code{hidden_dim = 512} NSF therefore
+needs roughly \code{160} times more memory per row than its \code{D = 9} output
+suggests, and the automatic chunk size is set from the model's widest internal
+layer (found by \code{.probotFlowActWidth()}) rather than from \code{D} alone.
+This is why the budget is per-model: a default-width (\code{hidden_dim = 32})
+RealNVP is unaffected, while a wide flow or a \code{\link{probotFlowLoc}} model
+with a broad head gets a smaller chunk. MPS is given a larger budget than CPU
+because it keeps activations on-device. Chunking more finely costs nothing
+statistically but does change the random stream, so results are reproducible
+only at a fixed \code{batch_size} (or a fixed automatic one).
 }
 \value{
 If \option{input} is a vector, returns a numeric matrix of shape \eqn{n\_samples \times D}, where \eqn{D} is the number

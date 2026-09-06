@@ -1,3 +1,43 @@
+# Width of the widest activation a forward/inverse sweep materialises per row.
+# Every conditioner in every flow style is an MLP whose internal layers are
+# `hidden_dim` wide, and the inverse pass touches them one layer at a time, so
+# peak device memory tracks (rows in the batch) * (hidden_dim) floats -- not
+# * output_dim. Estimating it from the parameters rather than metadata keeps it
+# correct for a loaded checkpoint and for the probotFlowLoc wrapper, whose
+# widest layer is the head, not the flow.
+.probotFlowActWidth <- function(model) {
+  width <- 32L
+  for (p in model$parameters) {
+    if (p$dim() == 2L) width <- max(width, as.integer(p$shape[1]))
+  }
+  width
+}
+
+# Rows the inverse pass may take at once. Two independent ceilings: the
+# (rows x output_dim) draw matrix that comes back to R, and the
+# (rows x hidden_dim) conditioner activations that stay on the device. The
+# second is what bites on wide flows: at hidden_dim = 512 and the old 2e6-row
+# default it asks for ~4 GB per layer, which does not merely slow sampling
+# down, it fails outright. Measured on the 9-layer/hidden-512 prospect NSF.
+# CPU: 100k rows = 4.7 GB at 10 us/row, 500k = 15.5 GB, 2e6 = fatal. MPS,
+# which holds activations on-device so RSS looks flat: 50k-200k rows at
+# 2.4-3.9 us/row, degrading to 21 us/row at 500k and 103 us/row at 1M. Each
+# constant sits just inside its backend's measured sweet spot -- they roughly
+# cancel, so the point of the budget is not crashing, not speed.
+# Narrow flows still hit the original 2e6 draw-row ceiling, so their behaviour
+# and their RNG stream are unchanged: 6.4e7 / 32 is exactly the old 2e6 draw
+# budget, so a default-width (hidden_dim = 32) flow hits the two ceilings at
+# the same point. The activation term only binds for wider conditioners --
+# 125k rows at hidden_dim = 512 on CPU, 200k on MPS.
+.probotFlowChunkRows <- function(act_width, device) {
+  draw_rows <- 2e6
+  # device may arrive as a plain string when the caller supplied one, so test
+  # the rendered form rather than $type.
+  act_floats <- if (grepl("mps", as.character(device))) 1.024e8 else 6.4e7
+  act_rows <- floor(act_floats / max(1L, act_width))
+  max(1L, min(draw_rows, act_rows))
+}
+
 # Deterministic point estimate for every row of `input`, computed in one pass
 # without drawing any samples. `input` is an already-placed 2-D tensor and
 # means_t/sds_t are the on-device scale vectors built by the caller (or NULL),
@@ -127,22 +167,38 @@ probotSamplePostNF <- function(input,
 
   # ------------------------------------------------------------------
   # SINGLE OBSERVATION MODE
+  #
+  # Same batched inverse sweep as the multi-observation path; it is a separate
+  # branch only so the result can stay a plain (n_samples, output_dim) matrix.
+  # Here the chunk axis is the sample axis, because n_samples on its own can
+  # exceed the row budget (the assess functions default to 1e4).
   # ------------------------------------------------------------------
 
-  if (input$dim() == 2L && input$size(1) == 1) {
-    z_base <- torch_randn(c(n_samples, output_dim), device = device)
+  act_width <- .probotFlowActWidth(model)
+  row_budget <- .probotFlowChunkRows(act_width, device)
 
-    context_expanded <- input$expand(c(n_samples, input$size(2)))
+  if (input$dim() == 2L && input$size(1) == 1) {
+    samples <- matrix(NA_real_, nrow = n_samples, ncol = output_dim)
+    per_chunk <- min(n_samples, row_budget)
 
     with_no_grad({
-      theta_t <- model$inverse(z_base, context_expanded)
+      for (start in seq(1L, n_samples, by = per_chunk)) {
+        end <- min(start + per_chunk - 1L, n_samples)
+        m <- end - start + 1L
+
+        z_base <- torch_randn(c(m, output_dim), device = device)
+        theta_t <- model$inverse(
+          z_base,
+          input$expand(c(m, input$size(2)))
+        )
+
+        if (!is.null(col_means)) {
+          theta_t <- theta_t * sds_t + means_t
+        }
+
+        samples[start:end, ] <- as.matrix(theta_t$cpu())
+      }
     })
-
-    if (!is.null(col_means)) {
-      theta_t <- theta_t * sds_t + means_t
-    }
-
-    samples <- as.matrix(theta_t$cpu())
 
     colnames(samples) <- col_names
 
@@ -154,11 +210,10 @@ probotSamplePostNF <- function(input,
   # input shape:   (N_obs, N_features)
   # returns:       array of shape (n_samples, output_dim, N_obs)
   #
-  # Observations are processed in chunks of `batch_size` rows so the
-  # large temporaries (z, expanded context, theta) stay bounded in
-  # memory. This is what makes millions of observations feasible:
-  # everything is computed on-device in bounded batches and only the
-  # accumulated result is ever held in R.
+  # Observations are processed in chunks so the (batch_size * n_samples) rows
+  # handed to the inverse pass stay within row_budget. Peak memory follows
+  # that number, not n_test * n_samples, and only the accumulated result is
+  # ever held in R.
   # ------------------------------------------------------------------
 
   if (input$dim() != 2L) {
@@ -168,14 +223,25 @@ probotSamplePostNF <- function(input,
   N_obs <- input$size(1)
   N_feat <- input$size(2)
 
-  # Auto-size the chunk so that batch_size * n_samples rows is held in
-  # memory at once (~2e6 rows default). Override with batch_size for
-  # machines with less/more headroom.
+  # batch_size is documented in observations. The memory budget is not
+  # negotiable -- exceeding it does not slow sampling down, it exhausts RAM --
+  # so an explicit batch_size above the cap is clamped. Because draws come from
+  # one torch_randn() per chunk, a different chunk size means a different RNG
+  # stream, so this is announced rather than done silently. Recipes whose
+  # batch_size already fits are untouched and stay bit-reproducible.
+  cap <- max(1L, floor(row_budget / n_samples))
   if (is.null(batch_size)) {
-    batch_size <- max(1L, floor(2e6 / n_samples))
+    batch_size <- cap
+  } else if (batch_size > cap) {
+    warning("batch_size = ", batch_size, " with n_samples = ", n_samples,
+            " would feed ", format(batch_size * n_samples, scientific = TRUE),
+            " rows to the inverse pass; for this model (widest internal layer ",
+            act_width, ") that is not memory-safe, so it is reduced to ", cap,
+            ". Posterior draws depend on the chunk size, so this changes the ",
+            "random stream.", call. = FALSE)
+    batch_size <- cap
   }
-
-  batch_size <- min(batch_size, N_obs)
+  batch_size <- as.integer(min(batch_size, N_obs))
 
   n_chunks <- ceiling(N_obs / batch_size)
   progress_every <- max(1L, floor(n_chunks / 20))

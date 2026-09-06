@@ -272,9 +272,32 @@ probotCRPS <- function(
     model = model, mdn_components = mdn_components, output_dim = output_dim
   )
 
+  # A flow's inverse pass additionally holds (rows x widest internal layer)
+  # conditioner activations, which at hidden_dim = 512 is ~160x the draw array.
+  # Take the sampler's own ceiling so the two never disagree, and apply it here
+  # rather than letting the sampler clamp per chunk: this loop hands down one
+  # window at a time, so an over-budget batch_size would otherwise warn once
+  # per chunk.
+  row_cap <- if (.probotIsFlow(model)) {
+    .probotFlowChunkRows(
+      .probotFlowActWidth(model),
+      if (length(model$parameters) > 0) model$parameters[[1]]$device
+      else .probotChooseDevice(NULL)
+    )
+  } else {
+    2e6
+  }
+  obs_cap <- max(1L, floor(row_cap / n_samples))
+
   if (is.null(batch_size)) {
-    # Size the chunk so that roughly 2e6 draw rows exist at any one time.
-    batch_size <- max(1L, floor(2e6 / n_samples))
+    # Size the chunk so that both the draw array and the activations fit.
+    batch_size <- min(max(1L, floor(2e6 / n_samples)), obs_cap)
+  } else if (batch_size > obs_cap) {
+    warning("batch_size = ", batch_size, " with n_samples = ", n_samples,
+            " is not memory-safe for this model; reduced to ", obs_cap,
+            ". Posterior draws depend on the chunk size, so this changes the ",
+            "random stream.", call. = FALSE)
+    batch_size <- obs_cap
   }
 
   batch_size <- as.integer(min(batch_size, n_test))

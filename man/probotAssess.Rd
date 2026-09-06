@@ -95,7 +95,12 @@ probotTARP(
 
   \item{batch_size}{Number of observations sampled per chunk, passed to the
     underlying sampler. If \code{NULL} (default) the chunk size is
-    chosen automatically to bound memory.}
+    chosen automatically to bound memory. For flow models the automatic size
+    also accounts for the conditioner activations inside the inverse pass,
+    which are far wider than the \eqn{D}-column draw matrix (see
+    \code{\link{probotSamplePostNF}}); for MDN models only the draw array is
+    budgeted. An explicit \code{batch_size} is passed through to the sampler,
+    which clamps it with a warning if it is not memory-safe.}
 
   \item{verbose}{Logical. If \code{TRUE} (default), print progress for each
     chunk of observations scored, as
@@ -154,6 +159,14 @@ probotTARP(
   rather than \code{n_test}; the returned matrix tracks only
   \eqn{n_\text{test} \times D}. Lower \code{batch_size} if memory becomes restrictive,
   at the cost of more (smaller) sampling passes.
+
+  For a flow the automatic chunk size is bounded by the sampler's own activation
+  budget as well as the draw array, because the inverse pass is wide in
+  \code{hidden_dim} rather than in \eqn{D}. An explicit \code{batch_size} that
+  exceeds that budget is reduced here, with a single warning, rather than once
+  per chunk. Either way, changing \code{batch_size} changes the random stream
+  the draws come from, so a scored result is reproducible only at a fixed chunk
+  size; scores that average over many draws are otherwise insensitive to it.
 }
 \value{
   \code{probotCRPS()} returns a numeric matrix of shape
