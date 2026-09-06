@@ -107,6 +107,12 @@ probotFlowRealNVP <- nn_module(
   "probotFlowRealNVP",
     initialize = function(input_dim, output_dim, n_layers = 4, hidden_dim = 32, soft_clamp = 3, device = NULL) {
       self$n_layers <- n_layers
+      # Kept as constructed so probotSave() can record the architecture directly;
+      # scalars only, so they stay out of state_dict(). See ?probotSave.
+      self$input_dim   <- as.integer(input_dim)
+      self$output_dim  <- as.integer(output_dim)
+      self$hidden_dim  <- as.integer(hidden_dim)
+      self$soft_clamp  <- soft_clamp
 
       # Register each RealNVP layer directly on self so torch tracks parameters & device placement
       for (i in seq_len(n_layers)) {
@@ -511,6 +517,12 @@ probotFlowNSF <- nn_module(
   initialize = function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
                         n_bins = 8, tail_bound = 3, device = NULL) {
     self$n_layers <- n_layers
+    # See probotFlowRealNVP(): recorded so probotSave() need not be told.
+    self$input_dim  <- as.integer(input_dim)
+    self$output_dim <- as.integer(output_dim)
+    self$hidden_dim <- as.integer(hidden_dim)
+    self$n_bins     <- as.integer(n_bins)
+    self$tail_bound <- tail_bound
     for (i in seq_len(n_layers)) {
       self[[paste0("spline_layer_", i)]] <- .probotSplineCouplingLayer(
         input_dim, output_dim, hidden_dim, n_bins, tail_bound, device
@@ -722,7 +734,7 @@ probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
            # save -> load round trip reconstructs the exact architecture.
            maf = probotFlowMAF(
              input_dim = input_dim, output_dim = output_dim, n_blocks = maf_blocks,
-             n_layers_per_block = 2, hidden_dim = hidden_dim,
+             n_layers_per_block = n_layers_per_block, hidden_dim = hidden_dim,
              soft_clamp = soft_clamp, device = device
            ),
            nsf = probotFlowNSF(

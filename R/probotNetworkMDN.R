@@ -7,7 +7,14 @@ probotMakeMDN <- function(input_dim, output_dim, mdn_components,
     initialize = function() {
       self$activation_fn <- activation
       self$dropout_rate  <- dropout
-      
+      # Architecture as constructed, so probotSave() can record it without being
+      # told. Scalars only -- nn_linear owns the tensors -- which keeps these out
+      # of state_dict(). See ?probotSave.
+      self$input_dim      <- as.integer(input_dim)
+      self$output_dim     <- as.integer(output_dim)
+      self$mdn_components <- as.integer(mdn_components)
+      self$hidden_dims    <- as.integer(hidden_dims)
+
       dims <- c(input_dim, hidden_dims, mdn_components * (2 * output_dim + 1))
       
       layer_list <- list()

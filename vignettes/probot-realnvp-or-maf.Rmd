@@ -408,8 +408,7 @@ f <- tempfile(fileext = ".pt")
 mdl <- probotMakeFlow(input_dim = 9, output_dim = 4, n_layers = 3, hidden_dim = 32,
                       device = "cpu", style = "maf")()
 
-probotSave(model = mdl, filename = f, model_type = "flow",
-           input_dim = 9, output_dim = 4, n_layers = 3, hidden_dim = 32)
+probotSave(model = mdl, filename = f)
 
 back <- probotLoad(f, device = "cpu")
 cat("reloaded class:", paste(class(back$model), collapse = ", "), "\n")

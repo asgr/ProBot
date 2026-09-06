@@ -10,6 +10,10 @@ probotMakePoint <- function(input_dim, output_dim,
     initialize = function() {
       self$activation_fn <- activation
       self$dropout_rate <- dropout
+      # See probotMakeMDN(): scalars on self for probotSave() to record.
+      self$input_dim   <- as.integer(input_dim)
+      self$output_dim  <- as.integer(output_dim)
+      self$hidden_dims <- as.integer(hidden_dims)
       
       dims <- c(input_dim, hidden_dims, output_dim)
       

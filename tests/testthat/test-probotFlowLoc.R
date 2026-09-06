@@ -120,9 +120,7 @@ test_that("probotFlowLoc round trips through probotSave/probotLoad", {
   ctx <- torch_tensor(matrix(rnorm(8 * 10), 8, 10))
   with_no_grad({ pre <- as.matrix(mdl$inverse(z, ctx)$cpu()) })
 
-  probotSave(model = mdl, optimizer = opt, filename = path, model_type = "flow",
-             input_dim = 10, output_dim = 4, n_layers = 3, hidden_dim = 16,
-             n_bins = 8, tail_bound = 3, soft_clamp = 3)
+  probotSave(model = mdl, optimizer = opt, filename = path)
 
   back <- probotLoad(path, device = "cpu")
   expect_s3_class(back$model, "probotFlowLoc")
@@ -143,8 +141,7 @@ test_that("checkpoints saved without loc_head metadata load as plain flows", {
   on.exit(unlink(path), add = TRUE)
   mdl <- probotMakeFlow(10, 4, style = "maf", n_blocks = 2, n_layers = 2,
                         hidden_dim = 16, device = "cpu")()
-  probotSave(model = mdl, filename = path, model_type = "flow", input_dim = 10,
-             output_dim = 4, n_blocks = 2, hidden_dim = 16)
+  probotSave(model = mdl, filename = path)
   back <- probotLoad(path, device = "cpu")
   expect_false(inherits(back$model, "probotFlowLoc"))
   expect_equal(back$metadata$flow_style, "maf")
