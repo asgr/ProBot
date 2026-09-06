@@ -706,7 +706,7 @@ probotMakeFlow <- function(input_dim, output_dim, n_layers = 4, hidden_dim = 32,
                            soft_clamp = 3, device = NULL, style = "realnvp",
                            n_bins = 8, tail_bound = 3,
                            loc_head = FALSE,
-                           loc_hidden_dims = c(128, 128), ...) {
+                           loc_hidden_dims = c(128, 128)) {
   # Facade so probotLoad()'s "flow" reconstruction works. Returns a
   # zero-arg constructor, matching the `probotMakeX(...)` `()` pattern.
   # Disambiguates the available flow architectures:

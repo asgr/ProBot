@@ -16,8 +16,7 @@ comparison and guidance on choosing between them.
 probotMakeFlow(input_dim, output_dim,
   n_layers = 4, hidden_dim = 32, n_blocks = NULL, n_layers_per_block = 2,
   soft_clamp = 3, device = NULL, style = "realnvp", n_bins = 8, tail_bound = 3,
-  loc_head = FALSE, loc_hidden_dims = c(128, 128)
-)
+  loc_head = FALSE, loc_hidden_dims = c(128, 128))
 }
 \arguments{
     \item{input_dim}{Dimensionality of the context/input features used to

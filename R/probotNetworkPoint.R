@@ -2,8 +2,7 @@ probotMakePoint <- function(input_dim, output_dim,
                             hidden_dims = c(128, 256, 256),
                             activation = nnf_relu,
                             dropout = 0,
-                            device = NULL,
-                            ...) {
+                            device = NULL) {
   
   nn_module(
     "mlp_point",

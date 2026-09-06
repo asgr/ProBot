@@ -7,15 +7,9 @@ with a Mixture Density Network (MDN) output layer. The network maps input featur
 to a mixture of Gaussian components over the output parameters.
 }
 \usage{
-probotMakeMDN(
-  input_dim,
-  output_dim,
-  mdn_components,
-  hidden_dims = c(128, 256, 256),
-  activation = nnf_relu,
-  dropout = 0,
-  device = NULL
-)
+probotMakeMDN(input_dim, output_dim, mdn_components,
+  hidden_dims = c(128, 256, 256), activation = nnf_relu, dropout = 0,
+  device = NULL)
 }
 \arguments{
     \item{input_dim}{Number of input features.}
