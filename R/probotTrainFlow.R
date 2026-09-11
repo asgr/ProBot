@@ -16,6 +16,15 @@
 # Jacobian-weighting bias. Only available for that architecture, and there is
 # nothing to estimate for the plain flows.
 #
+# "grid" maps an arbitrary set of m *known* base-space points through the
+# inverse, given in `z_pts` as an (m, output_dim) matrix or tensor. Unlike the
+# four above it returns a 3-D (n_obs, m, output_dim) tensor, so callers pick
+# their result rank from `point`. It is the deterministic generalisation of
+# "centre" (which is just the single point z = 0) and of "mean" (which uses
+# random points); nothing about it is a posterior *summary*, which is why the
+# trainers do not offer it -- their blended MSE term needs one row per
+# observation. See probotSigmaPostNF() for the user-facing wrapper.
+#
 # Draws for all rows are stacked into a single (n_obs * m, output_dim) inverse
 # call rather than looping, which is what makes the cost tolerable for the
 # coupling styles. The reshape back to (n_obs, m, output_dim) must match the
@@ -25,8 +34,45 @@
                                      context,
                                      output_dim,
                                      point = "centre",
-                                     n_point_samples = 32) {
-  point <- match.arg(point, choices = c("centre", "mean", "loc"))
+                                     n_point_samples = 32,
+                                     z_pts = NULL) {
+  point <- match.arg(point,
+                     choices = c("centre", "mean", "loc", "grid"))
+
+  if (point == "grid") {
+    if (is.null(z_pts)) {
+      stop("'point = \"grid\"' requires the 'z_pts' base-space grid.",
+           call. = FALSE)
+    }
+    if (!inherits(z_pts, "torch_tensor")) {
+      z_pts <- torch_tensor(z_pts, dtype = context$dtype,
+                            device = context$device)
+    } else {
+      z_pts <- z_pts$to(dtype = context$dtype, device = context$device)
+    }
+    if (z_pts$dim() == 1L) {
+      z_pts <- z_pts$unsqueeze(1)
+    }
+    if (z_pts$dim() != 2L || z_pts$size(2) != output_dim) {
+      stop("'z_pts' must be an (m, output_dim) grid with output_dim = ",
+           output_dim, call. = FALSE)
+    }
+
+    n_obs <- context$size(1)
+    n_ctx <- context$size(2)
+    m <- z_pts$size(1)
+
+    # z_pts is tiled whole, m rows at a time, so the stacked rows are
+    # (obs 1 x m points), (obs 2 x m points), ... -- the same order the
+    # "mean" branch above relies on, and what the reshape below groups on.
+    z_all <- z_pts$`repeat`(c(n_obs, 1L))
+    ctx <- context$unsqueeze(2)$expand(c(n_obs, m, n_ctx))$
+      reshape(c(n_obs * m, n_ctx))
+
+    theta <- model$inverse(z_all, ctx)
+
+    return(theta$reshape(c(n_obs, m, output_dim)))
+  }
 
   if (point == "loc") {
     if (!inherits(model, "probotFlowLoc")) {

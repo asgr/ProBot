@@ -329,7 +329,8 @@ test_that("rational quadratic spline is the identity at and beyond the domain ed
 test_that("probotNetworkSuggest returns list for Point", {
   s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("input_dim", "output_dim", "hidden_dims", "dropout", "n_params"))
+  expect_named(s, c("input_dim", "output_dim", "hidden_dims", "dropout"))
+  expect_type(attr(s, "n_params"), "double")
   expect_equal(s$input_dim, 5L)
   expect_equal(s$output_dim, 2L)
   expect_length(s$hidden_dims, 3L)
@@ -338,7 +339,7 @@ test_that("probotNetworkSuggest returns list for Point", {
 test_that("probotNetworkSuggest returns list for MDN", {
   s <- probotNetworkSuggest(10, 3, type = "MDN", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("input_dim", "output_dim", "mdn_components", "hidden_dims", "dropout", "n_params"))
+  expect_named(s, c("input_dim", "output_dim", "mdn_components", "hidden_dims", "dropout"))
   expect_gte(s$mdn_components, 3L)
   expect_lte(s$mdn_components, 20L)
 })
@@ -346,10 +347,30 @@ test_that("probotNetworkSuggest returns list for MDN", {
 test_that("probotNetworkSuggest returns list for Flow", {
   s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
   expect_type(s, "list")
-  expect_named(s, c("input_dim", "output_dim", "n_layers", "hidden_dim", "style", "n_params"))
+  expect_named(s, c("input_dim", "output_dim", "n_layers", "hidden_dim", "style"))
   expect_equal(s$input_dim, 6L)
   expect_equal(s$output_dim, 4L)
   expect_equal(s$style, "realnvp")
+})
+
+# Regression guard: the suggestion list is documented as splittable straight
+# into the matching constructor with do.call(). Those constructors take no
+# `...`, so any report-only field (n_params and its successors) silently
+# becomes an "unused argument" error. Assert every name the list carries is a
+# real formal of the constructor it is meant for.
+test_that("probotNetworkSuggest fields are all accepted by their constructor", {
+  ctors = list(Point = probotMakePoint, MDN = probotMakeMDN, Flow = probotMakeFlow)
+
+  for (tp in names(ctors)) {
+    for (fs in c("realnvp", "maf", "nsf")) {
+      s <- probotNetworkSuggest(6, 4, type = tp, flow_style = fs, verbose = FALSE)
+      formal_names <- names(formals(ctors[[tp]]))
+      expect_true(all(names(s) %in% formal_names),
+                  info = paste(tp, fs, "->",
+                               paste(setdiff(names(s), formal_names), collapse = ", ")))
+      expect_null(s$n_params)
+    }
+  }
 })
 
 test_that("probotNetworkSuggest Flow defaults to RealNVP and is style-aware", {
@@ -463,7 +484,7 @@ test_that("probotNetworkSuggest hidden_dims clamped to [32, 1024]", {
   expect_lte(s2$hidden_dims[1], 1024L)
 })
 
-# ---- n_params tests ----
+# ---- constructor plug-in tests ----
 
 # Defined before its first use below: testthat evaluates the file top to
 # bottom, so a helper declared after the tests that call it is not yet in
@@ -503,7 +524,7 @@ test_that("probotNetworkSuggest NSF output plugs into probotMakeFlow", {
                             verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
   expect_true(inherits(mdl, "probotFlowNSF"))
-  expect_equal(s$n_params, .count_params(mdl))
+  expect_equal(attr(s, "n_params"), .count_params(mdl))
 })
 
 test_that("probotNetworkSuggest errors on invalid type", {
@@ -532,24 +553,26 @@ test_that("probotNetworkSuggest MDN components correct for odd output_dim", {
   expect_equal(s3$mdn_components, 5L)
 })
 
-# ---- n_params tests ----
+# ---- n_params accuracy tests ----
+# The heuristic estimates are carried as an attribute rather than a list
+# element (see the plug-in guard above); they are exact for every style.
 
 test_that("probotNetworkSuggest n_params matches actual Point model", {
   s <- probotNetworkSuggest(5, 2, type = "Point", verbose = FALSE)
   mdl <- do.call(probotMakePoint, c(s, list(device = "cpu")))()
-  expect_equal(s$n_params, .count_params(mdl))
+  expect_equal(attr(s, "n_params"), .count_params(mdl))
 })
 
 test_that("probotNetworkSuggest n_params matches actual MDN model", {
   s <- probotNetworkSuggest(7, 3, type = "MDN", verbose = FALSE)
   mdl <- do.call(probotMakeMDN, c(s, list(device = "cpu")))()
-  expect_equal(s$n_params, .count_params(mdl))
+  expect_equal(attr(s, "n_params"), .count_params(mdl))
 })
 
 test_that("probotNetworkSuggest n_params matches actual RealNVP Flow model", {
   s <- probotNetworkSuggest(6, 4, type = "Flow", verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
-  expect_equal(s$n_params, .count_params(mdl))
+  expect_equal(attr(s, "n_params"), .count_params(mdl))
 })
 
 test_that("probotNetworkSuggest n_params matches actual MAF Flow model", {
@@ -557,7 +580,7 @@ test_that("probotNetworkSuggest n_params matches actual MAF Flow model", {
                             verbose = FALSE)
   mdl <- do.call(probotMakeFlow, c(s, list(device = "cpu")))()
   # masks are buffers, not parameters, so the dense-counting heuristic is exact
-  expect_equal(s$n_params, .count_params(mdl))
+  expect_equal(attr(s, "n_params"), .count_params(mdl))
 })
 
 test_that("probotNetworkSuggest prints n_params when verbose = TRUE", {

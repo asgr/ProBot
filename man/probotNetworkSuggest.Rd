@@ -95,27 +95,28 @@ avoid pathologically small or large layers.
 }
 \value{
 A named list with entries ready to be passed to the corresponding constructor.
-The corresponding \code{probotMake*} constructors accept (and ignore) any
-extra arguments such as \code{n_params}, so the list can be passed directly
-via \code{do.call}.
+The \code{probotMake*} constructors take no \code{\dots}, so the list can be
+spliced straight into them via \code{do.call}.
 
 \describe{
   \item{\code{type = "Point"}}{
-    \code{input_dim}, \code{output_dim}, \code{hidden_dims}, \code{dropout},
-    \code{n_params}.
+    \code{input_dim}, \code{output_dim}, \code{hidden_dims}, \code{dropout}.
   }
   \item{\code{type = "MDN"}}{
     \code{input_dim}, \code{output_dim}, \code{mdn_components},
-    \code{hidden_dims}, \code{dropout}, \code{n_params}.
+    \code{hidden_dims}, \code{dropout}.
   }
   \item{\code{type = "Flow"}}{
     \code{input_dim}, \code{output_dim}, \code{n_layers}, \code{hidden_dim},
-    \code{style}, \code{n_params}.
+    \code{style} (and \code{n_bins} when \code{flow_style = "nsf"}).
   }
 }
 
-\code{n_params} is the estimated total number of trainable parameters
-(weights + biases) for the suggested architecture.
+The estimated total number of trainable parameters (weights + biases) for the
+suggested architecture is available as \code{attr(s, "n_params")}. It lives on
+the attribute (not as a list element) precisely so the list itself can be
+spliced into the constructor without an "unused argument" error.
+It is also printed in the verbose summary.
 
 The function also prints a human-readable summary when \code{verbose = TRUE}.
 The return value is invisibly returned so that it can be assigned or piped

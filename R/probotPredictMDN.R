@@ -1,3 +1,30 @@
+.mixture_sd <- function(means, sds, weights) {
+  # 1. Ensure weights sum to 1
+  if (sum(weights) != 1) {
+    weights <- weights / sum(weights)
+  }
+
+  # 2. Calculate the combined mean (mu)
+  combined_mean <- sum(weights * means)
+
+  # 3. Calculate individual variances
+  variances <- sds^2
+
+  # 4. Calculate the combined variance (Law of Total Variance)
+  #    It sums the weighted variances and the weighted squared differences from the mean
+  combined_variance <- sum(weights * (variances + (means - combined_mean)^2))
+
+  # 5. Calculate the combined standard deviation
+  combined_sd <- sqrt(combined_variance)
+
+  # Return the results as a named list
+  return(list(
+    mean = combined_mean,
+    variance = combined_variance,
+    sd = combined_sd
+  ))
+}
+
 probotPredictMDN <- function(input, model, mdn_components, device = NULL){
 
   if (is.null(device)) {

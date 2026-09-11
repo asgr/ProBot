@@ -283,3 +283,210 @@ test_that(".probotChunkApply budgets flow chunks but leaves MDNs alone", {
   expect_match(msgs[1], "reduced to 2")
 })
 
+
+# ============================================================
+# probotSigmaPostNF
+# ============================================================
+
+sigma_test_flow <- function(style = "realnvp", di = 2, D = 3, layers = 4, hid = 16) {
+  probotMakeFlow(di, D, n_layers = layers, hidden_dim = hid,
+                 device = "cpu", style = style)()
+}
+
+test_that("probotSigmaPostNF returns mean/sd matrices with names", {
+  mdl <- sigma_test_flow()
+  X <- matrix(rnorm(20 * 2), 20, 2)
+  r <- probotSigmaPostNF(X, mdl, output_dim = 3,
+                         col_names = c("A", "B", "C"))
+  expect_named(r, c("post_mean", "post_sd"))
+  expect_equal(dim(r$post_mean), c(20, 3))
+  expect_equal(dim(r$post_sd), c(20, 3))
+  expect_equal(colnames(r$post_sd), c("A", "B", "C"))
+  expect_true(all(is.finite(unlist(r))))
+  expect_true(all(r$post_sd >= 0))
+
+  # A vector input must collapse to length-D vectors, matching row 1.
+  r1 <- probotSigmaPostNF(X[1, ], mdl, output_dim = 3, col_names = c("A", "B", "C"))
+  expect_equal(r1$post_sd, as.vector(r$post_sd[1, ]), tolerance = 1e-5)
+  expect_equal(r1$post_mean, as.vector(r$post_mean[1, ]), tolerance = 1e-5)
+})
+
+test_that("probotSigmaPostNF sd is exactly the Jacobian row norm", {
+  # Independent brute-force reference: perturb one base axis at a time with a
+  # full 2-D batch, difference over 2 * eps, then take row norms.
+  mdl <- sigma_test_flow()
+  X <- matrix(rnorm(15 * 2), 15, 2)
+  D <- 3; eps <- 1e-3
+  xt <- torch_tensor(X, dtype = torch_float())
+  J <- array(0, c(15, D, D))
+  for (k in seq_len(D)) {
+    zp <- zm <- matrix(0, 15, D)
+    zp[, k] <- eps
+    zm[, k] <- -eps
+    up <- as.matrix(with_no_grad(mdl$inverse(torch_tensor(zp), xt)))
+    lo <- as.matrix(with_no_grad(mdl$inverse(torch_tensor(zm), xt)))
+    J[, , k] <- (up - lo) / (2 * eps)
+  }
+  ref_sd <- t(apply(J, 1, function(M) sqrt(rowSums(M^2))))
+
+  r <- probotSigmaPostNF(X, mdl, output_dim = D, eps = eps, batch_size = 4)
+  expect_equal(r$post_sd, ref_sd, tolerance = 1e-4)
+
+  # Negative control: the COLUMN norms are a different quantity (this is the
+  # dim = 2 vs dim = 3 trap), so they must not match.
+  col_norms <- t(apply(J, 1, function(M) sqrt(colSums(M^2))))
+  expect_false(isTRUE(all.equal(r$post_sd, col_norms, tolerance = 1e-2)))
+})
+
+test_that("probotSigmaPostNF centre matches point_estimate = TRUE", {
+  for (style in c("realnvp", "maf", "nsf")) {
+    mdl <- sigma_test_flow(style)
+    X <- matrix(rnorm(12 * 2), 12, 2)
+    r <- probotSigmaPostNF(X, mdl, output_dim = 3)
+    pe <- probotSamplePostNF(X, mdl, output_dim = 3, point_estimate = TRUE)
+    expect_equal(as.vector(r$post_mean), as.vector(pe),
+                 tolerance = 1e-6, info = style)
+  }
+})
+
+test_that("probotSigmaPostNF sd agrees with sampling for a learnable problem", {
+  # Trained, in-distribution, and symmetric enough that a first-order
+  # approximation should hold. RealNVP/MAF track closely; the tolerance below
+  # is loose because the estimator is approximate by construction, and the
+  # reference itself carries Monte-Carlo error.
+  for (style in c("realnvp", "maf")) {
+    set.seed(11)
+    n <- 2000L
+    x <- matrix(rnorm(n * 3), n, 3)
+    th <- cbind(x %*% c(1, -1, .5) + .3 * rnorm(n),
+                .5 * x[, 2] + .4 * rnorm(n),
+                x[, 3] * .2 + .6 * rnorm(n))
+    dl <- probotDataLoader(x, th, batch = 256, shuffle = TRUE, device = "cpu")
+    mdl <- probotMakeFlow(3, 3, n_layers = 4, hidden_dim = 32,
+                          device = "cpu", style = style)()
+    probotTrainFlow(mdl, dl, optim_adam(mdl$parameters, lr = 1e-3),
+                    epochs = 40, verbose = FALSE, early_stop = FALSE)
+
+    te <- matrix(rnorm(60 * 3), 60, 3)
+    r <- probotSigmaPostNF(te, mdl, output_dim = 3, batch_size = 30)
+    S <- probotSamplePostNF(te, mdl, n_samples = 2000, output_dim = 3,
+                            batch_size = 10)
+    ss <- t(apply(S, c(2, 3), sd))
+    ratio <- colMeans(r$post_sd / ss)
+    expect_true(all(ratio > 0.8 & ratio < 1.25), info = style)
+  }
+})
+
+test_that("probotSigmaPostNF unscales mean and sd consistently", {
+  mdl <- sigma_test_flow()
+  X <- matrix(rnorm(10 * 2), 10, 2)
+  cm <- c(10, 20, 30); cs <- c(2, 3, 4)
+  raw <- probotSigmaPostNF(X, mdl, output_dim = 3)
+  uns <- probotSigmaPostNF(X, mdl, col_means = cm, col_sds = cs)
+
+  expect_equal(uns$post_mean, raw$post_mean * matrix(cs, 10, 3, byrow = TRUE) +
+                              matrix(cm, 10, 3, byrow = TRUE), tolerance = 1e-4)
+  # sd scales by col_sds only, never by col_means.
+  expect_equal(uns$post_sd, raw$post_sd * matrix(cs, 10, 3, byrow = TRUE),
+               tolerance = 1e-4)
+
+  # A scalar col_sds is recycled across output_dim, exactly as in the sampler;
+  # output_dim must be given explicitly, since col_means no longer implies it.
+  one <- probotSigmaPostNF(X, mdl, col_means = 5, col_sds = 2, output_dim = 3)
+  expect_equal(one$post_sd, raw$post_sd * 2, tolerance = 1e-4)
+  expect_equal(one$post_mean, raw$post_mean * 2 + 5, tolerance = 1e-4)
+})
+
+test_that("probotSigmaPostNF is deterministic in batch_size", {
+  # The whole point of a deterministic grid: unlike the sampler, chunking
+  # cannot change the answer.
+  mdl <- sigma_test_flow()
+  X <- matrix(rnorm(12 * 2), 12, 2)
+  a <- probotSigmaPostNF(X, mdl, output_dim = 3, batch_size = 1)
+  b <- probotSigmaPostNF(X, mdl, output_dim = 3, batch_size = 12)
+  expect_equal(a$post_sd, b$post_sd, tolerance = 1e-4)
+  expect_equal(a$post_mean, b$post_mean, tolerance = 1e-4)
+})
+
+test_that("probotSigmaPostNF clamps an over-budget batch_size with a warning", {
+  output_dim <- 3
+  mdl <- mock_flow(output_dim, act = 64000L)  # row budget of exactly 1000
+  # n_probe = 2 * 3 + 1 = 7 rows/obs, so the cap is floor(1000 / 7) = 142.
+  input <- matrix(runif(200 * 2), nrow = 200)
+
+  expect_warning(
+    r <- probotSigmaPostNF(input, mdl, output_dim = output_dim, batch_size = 200),
+    "not memory-safe, so it is reduced to 142"
+  )
+  expect_equal(dim(r$post_sd), c(200, 3))
+
+  # mock inverse(z, x) = z, so J is the identity: every sd is exactly 1 and
+  # every centre exactly 0. Clamping must not disturb that.
+  expect_equal(as.vector(r$post_sd), rep(1, 600), tolerance = 1e-5)
+  expect_equal(as.vector(r$post_mean), rep(0, 600), tolerance = 1e-5)
+
+  # Chunking is result-invariant here (deterministic grid), unlike the sampler.
+  r2 <- probotSigmaPostNF(input, mdl, output_dim = output_dim, batch_size = 3)
+  expect_equal(r2$post_sd, r$post_sd, tolerance = 1e-6)
+})
+
+test_that("probotSigmaPostNF errors on the same inputs as the sampler", {
+  mdl <- sigma_test_flow()
+  X <- matrix(rnorm(4 * 2), 4, 2)
+  expect_error(probotSigmaPostNF(X, mdl), "Either 'output_dim' or 'col_means'")
+  expect_error(probotSigmaPostNF(X, mdl, col_means = c(1, 2, 3)),
+               "col_sds must be provided")
+  expect_error(probotSigmaPostNF(X, mdl, output_dim = 3, eps = 0),
+               "'eps' must be a single positive number")
+  expect_error(probotSigmaPostNF(X, mdl, output_dim = 3, eps = NA_real_),
+               "'eps' must be a single positive number")
+  expect_error(probotSigmaPostNF(array(rnorm(8), c(2, 2, 2)), mdl, output_dim = 3),
+               "must be either a vector or a matrix")
+})
+
+test_that("probotSigmaPostNF works for a location-head flow", {
+  mdl <- probotMakeFlow(2, 3, n_layers = 2, hidden_dim = 8, loc_head = TRUE,
+                        device = "cpu")()
+  X <- matrix(rnorm(6 * 2), 6, 2)
+  r <- probotSigmaPostNF(X, mdl, output_dim = 3)
+  expect_equal(dim(r$post_sd), c(6, 3))
+  expect_true(all(is.finite(unlist(r))))
+  # A head shifts the centre by mu(x) but leaves the residual scale alone, so
+  # post_mean must NOT equal probotSamplePostNF's point_estimate (= mu(x)).
+  pe <- probotSamplePostNF(X, mdl, output_dim = 3, point_estimate = TRUE)
+  expect_false(isTRUE(all.equal(as.vector(r$post_mean), as.vector(pe),
+                                tolerance = 1e-2)))
+})
+
+test_that(".probotFlowPointEstimate grid branch validates and tiles", {
+  mdl <- sigma_test_flow()
+  X <- matrix(rnorm(5 * 2), 5, 2)
+  xt <- torch_tensor(X, dtype = torch_float())
+
+  expect_error(.probotFlowPointEstimate(mdl, xt, output_dim = 3, point = "grid"),
+               "requires the 'z_pts'")
+  expect_error(.probotFlowPointEstimate(mdl, xt, output_dim = 3, point = "grid",
+                                        z_pts = matrix(0, 4, 4)),
+               "must be an \\(m, output_dim\\) grid")
+
+  out <- .probotFlowPointEstimate(mdl, xt, output_dim = 3, point = "grid",
+                                  z_pts = matrix(0, 1, 3))
+  expect_equal(out$shape, c(5, 1, 3))
+  # z = 0 for every row, so every row must equal the centre sweep.
+  centre <- .probotFlowPointEstimate(mdl, xt, output_dim = 3, point = "centre")
+  expect_equal(as.matrix(out[, 1, ]), as.matrix(centre), tolerance = 1e-6)
+
+  # A single-row grid given as a vector is promoted, not rejected.
+  v <- .probotFlowPointEstimate(mdl, xt, output_dim = 3, point = "grid",
+                                z_pts = c(0, 0, 0))
+  expect_equal(v$shape, c(5, 1, 3))
+})
+
+test_that(".probotSigmaGrid lays out axis-major probes", {
+  g <- ProBot:::.probotSigmaGrid(c(0.1, 0.2), 3)
+  expect_equal(dim(g), c(6, 3))
+  expect_equal(g[1, ], c(0.1, 0, 0))
+  expect_equal(g[2, ], c(0.2, 0, 0))
+  expect_equal(g[3, ], c(0, 0.1, 0))
+  expect_equal(g[6, ], c(0, 0, 0.2))
+})

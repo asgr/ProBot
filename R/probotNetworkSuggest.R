@@ -74,9 +74,9 @@ probotNetworkSuggest = function(input_dim,
                        input_dim   = input_dim,
                        output_dim  = output_dim,
                        hidden_dims = hidden_dims,
-                       dropout     = dropout,
-                       n_params    = n_params
+                       dropout     = dropout
                      )
+                     suggestion = .suggest_attach_n_params(suggestion, n_params)
                      if (verbose) {
                        .suggest_print(
                          "Point",
@@ -115,9 +115,9 @@ probotNetworkSuggest = function(input_dim,
                        output_dim     = output_dim,
                        mdn_components = mdn_components,
                        hidden_dims    = hidden_dims,
-                       dropout        = dropout,
-                       n_params       = n_params
+                       dropout        = dropout
                      )
+                     suggestion = .suggest_attach_n_params(suggestion, n_params)
                      if (verbose) {
                        .suggest_print(
                          "MDN",
@@ -214,8 +214,8 @@ probotNetworkSuggest = function(input_dim,
                        hidden_dim = hidden_dim,
                        style      = flow_style
                      ),
-                     if (flow_style == "nsf") list(n_bins = 8L) else list(),
-                     list(n_params = n_params))
+                     if (flow_style == "nsf") list(n_bins = 8L) else list())
+                     suggestion = .suggest_attach_n_params(suggestion, n_params)
                      if (verbose) {
                        .suggest_print(
                          switch(flow_style,
@@ -253,6 +253,16 @@ probotNetworkSuggest = function(input_dim,
 
 .suggest_params_line = function(n_params) {
   sprintf("n_params   : ~%s", format(as.integer(round(n_params)), big.mark = ","))
+}
+
+# n_params is report-only metadata: it is printed in the verbose summary and
+# carried on the result as an attribute, but deliberately kept OUT of the list
+# itself so the list can be splatted straight into the (strict) probotMake*
+# constructors via do.call(). Attaching rather than including it is what lets
+# both of those hold at once.
+.suggest_attach_n_params = function(suggestion, n_params) {
+  attr(suggestion, "n_params") = n_params
+  suggestion
 }
 
 # Round x to the nearest multiple of 32 (keeps values "power-of-two-friendly")

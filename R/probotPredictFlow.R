@@ -62,6 +62,231 @@
   if (nrow(m) == 1L) as.vector(m) else m
 }
 
+# Base-space probe grid: row (j - 1) * n + i is displacement[i] on axis j, with
+# every other coordinate zero. Returns an R matrix so the caller can choose the
+# device; probotSigmaPostNF() stacks a +/- pair of these and reads the two
+# blocks apart as the columns of d theta / d z.
+.probotSigmaGrid <- function(displacements, output_dim) {
+  n <- length(displacements)
+  z <- matrix(0, nrow = n * output_dim, ncol = output_dim)
+  for (j in seq_len(output_dim)) {
+    rows <- seq_len(n) + (j - 1L) * n
+    z[rows, j] <- displacements
+  }
+  z
+}
+
+# Approximate posterior location and scale per observation, in ONE inverse
+# sweep, without drawing samples.
+#
+# What it computes. A flow pushes z ~ N(0, I) forward to theta = f^{-1}(z, x).
+# Linearising that map at z = 0 gives a Gaussian for theta whose mean is the
+# centre theta_0 = f^{-1}(0, x) and whose covariance is
+#     Sigma = J J^T,   J = d theta / d z |_{z = 0}
+# so the marginal scale of parameter j is the norm of row j of J:
+#     sd_j = sqrt(sum_k J[j, k]^2).
+# J is read off by finite differences: perturb base axis k by +/- eps, invert,
+# and take the difference over 2 * eps. That is 2D + 1 inverse rows per
+# observation, against the 5000 rows a default probotSamplePostNF() call costs.
+# On the 9-parameter ProSpect NSF (200 observations, CPU) the measured wall
+# clock ratio was about 295x.
+#
+# What that approximation is NOT. It is a local, first-order Gaussian summary
+# of the conditional posterior, so it carries no information about skewness or
+# multimodality, and it is centred on the base-distribution mode rather than
+# the mean. Measured against 4000-sample marginal SDs on flows trained for 60
+# epochs on a D = 3 heteroscedastic problem, and scored on fresh
+# in-distribution contexts, the delta/sample ratio was tight for two styles
+# (realnvp median 0.95-1.01, maf 1.00) but systematically low for the spline
+# one (nsf 0.77-0.98) -- its piecewise-linear derivative is the least well
+# approximated by a single local slope. The error is not bounded in general:
+# on the trained 9-parameter ProSpect NSF at random N(0, I) contexts the median
+# ratio fell to 0.54 with a 5-95 per cent range of 0.08-2.25, though those
+# contexts are themselves far off the training manifold and so inflate the
+# sampling side too. Treat the output as a cheap error bar for ranking and
+# plotting, not a calibrated interval. The calibrated route stays
+# probotSamplePostNF(), ideally scored with probotPIT()/probotCRPS()/probotTARP().
+#
+# Why the base axes and not the parameter axes. The obvious-seeming choice,
+# sweeping z along e_j and reading off theta_j, is NOT the marginal scale of
+# theta_j: it traces one coordinate of a curve through parameter space while
+# holding the *other* base coordinates fixed. Coupling inverses pass half their
+# coordinates through untouched and MAF inverses are triangular, so d theta_j /
+# d z_j is often near zero while d theta_j / d z_k for k != j is large. Measured
+# on the trained 9-parameter ProSpect NSF checkpoint, d theta_j / d z_j at
+# z = 0 ran 0.008 to -0.21 against off-diagonal entries above 2, and the e_j
+# sweep returned half-widths of 0.000-0.21 where sampling gave 0.7-1.2. The
+# row-norm formula above is the quantity that actually responds to base-space
+# noise in any direction, which is why this function computes that instead.
+probotSigmaPostNF <- function(input,
+                              model,
+                              col_means = NULL,
+                              col_sds = NULL,
+                              col_names = NULL,
+                              output_dim = NULL,
+                              device = NULL,
+                              eps = 1e-3,
+                              batch_size = NULL,
+                              verbose = FALSE) {
+  # ------------------------------------------------------------------
+  # Argument checks. Everything through to the chunking block mirrors
+  # probotSamplePostNF() -- dimensionality, device, tensor conversion and
+  # the on-device scale vectors -- so the two functions cannot disagree
+  # about what col_means/col_sds mean, or about which value is "the" point
+  # estimate of a row.
+  # ------------------------------------------------------------------
+
+  if (!is.numeric(eps) || length(eps) != 1L || is.na(eps) || eps <= 0) {
+    stop("'eps' must be a single positive number.", call. = FALSE)
+  }
+
+  if (is.null(output_dim)) {
+    if (!is.null(col_means)) {
+      output_dim <- length(col_means)
+    } else {
+      stop("Either 'output_dim' or 'col_means' must be provided.")
+    }
+  }
+
+  if (!is.null(col_means) && is.null(col_sds)) {
+    stop("col_sds must be provided when col_means is provided.")
+  }
+
+  if (is.null(device)) {
+    if (length(model$parameters) > 0) {
+      device <- model$parameters[[1]]$device
+    } else {
+      device <-
+        if (backends_mps_is_available()) {
+          torch_device("mps")
+        } else {
+          torch_device("cpu")
+        }
+    }
+  }
+
+  if (!inherits(input, "torch_tensor")) {
+    input <- torch_tensor(input, dtype = torch_float(), device = device)
+  } else {
+    input <- input$to(device = device)
+  }
+
+  model$eval()
+
+  means_t <- NULL
+  sds_t <- NULL
+
+  if (!is.null(col_means)) {
+    means_t <- torch_tensor(col_means, dtype = torch_float(), device = device)
+    sds_t <- torch_tensor(col_sds, dtype = torch_float(), device = device)
+
+    # Recycle length-1 vectors to output_dim (mirrors probotScaleBackward).
+    if (means_t$size(1) == 1L) means_t <- means_t$expand(c(output_dim))
+    if (sds_t$size(1) == 1L) sds_t <- sds_t$expand(c(output_dim))
+  }
+
+  if (input$dim() == 1L) {
+    input <- input$unsqueeze(1)
+  }
+
+  if (input$dim() != 2L) {
+    stop("'input' must be either a vector or a matrix")
+  }
+
+  N_obs <- input$size(1)
+  # 2D rows to probe the Jacobian columns, plus one zero row for the centre.
+  n_probe <- 2L * output_dim + 1L
+  z_probe <- rbind(0,
+                   .probotSigmaGrid(eps, output_dim),
+                   .probotSigmaGrid(-eps, output_dim))
+
+  # ------------------------------------------------------------------
+  # Chunking. The inverse pass materialises (rows * output_dim) values plus
+  # one hidden_dim-wide activation per row per layer, so peak memory tracks
+  # rows, and rows here is batch_size * n_probe. Nothing about the maths
+  # depends on the chunk size -- the probe grid is deterministic -- so
+  # unlike probotSamplePostNF() this cannot change results, only speed.
+  # ------------------------------------------------------------------
+
+  act_width <- .probotFlowActWidth(model)
+  row_budget <- .probotFlowChunkRows(act_width, device)
+
+  cap <- max(1L, floor(row_budget / n_probe))
+  if (is.null(batch_size)) {
+    batch_size <- cap
+  } else if (batch_size > cap) {
+    warning("batch_size = ", batch_size, " would feed ",
+            format(batch_size * n_probe, scientific = TRUE),
+            " rows to the inverse pass; for this model (widest internal layer ",
+            act_width, ") that is not memory-safe, so it is reduced to ", cap,
+            ". This does not change the result -- the probe grid is ",
+            "deterministic.", call. = FALSE)
+    batch_size <- cap
+  }
+  batch_size <- as.integer(min(batch_size, N_obs))
+
+  n_chunks <- ceiling(N_obs / batch_size)
+  progress_every <- max(1L, floor(n_chunks / 20))
+
+  mu_mat <- sd_mat <- matrix(NA_real_, nrow = N_obs, ncol = output_dim)
+
+  chunk_i <- 0L
+
+  with_no_grad({
+    for (start in seq(1L, N_obs, by = batch_size)) {
+      chunk_i <- chunk_i + 1L
+      end <- min(start + batch_size - 1L, N_obs)
+      B <- end - start + 1L
+
+      theta <- .probotFlowPointEstimate(
+        model,
+        context = input$narrow(1, start, B),
+        output_dim = output_dim,
+        point = "grid",
+        z_pts = z_probe
+      ) # (B, n_probe, output_dim)
+
+      # Columns of d theta / d z: probe column k is base axis k displaced by
+      # +/- eps. Row 1 is the unperturbed centre, and the grid is axis-major,
+      # so row 1 + k is +eps on axis k and row 1 + output_dim + k is -eps.
+      theta_0 <- theta$narrow(2, 1L, 1L)
+      dth <- (theta$narrow(2, 2L, output_dim) -
+                theta$narrow(2, output_dim + 2L, output_dim)) / (2 * eps)
+
+      # sd(theta_j) for z ~ N(0, I): row j of the Jacobian has squared norm
+      # equal to the sum of sensitivities over the independent base axes. dth
+      # is (B, base_axis, parameter), so the base axis is dim 2 -- summing the
+      # other one silently yields column norms instead, which are not the
+      # marginal scales.
+      var_j <- (dth^2)$sum(dim = 2) # (B, output_dim)
+
+      if (!is.null(means_t)) {
+        theta_0 <- theta_0 * sds_t + means_t
+        var_j <- var_j * (sds_t^2)
+      }
+
+      mu_mat[start:end, ] <- as.matrix(theta_0$squeeze(2)$cpu())
+      sd_mat[start:end, ] <- as.matrix(var_j$sqrt()$cpu())
+
+      if (verbose && (chunk_i %% progress_every == 0L || chunk_i == n_chunks)) {
+        cat(sprintf(
+          "probotSigmaPostNF: chunk %d/%d (obs %d-%d)\n",
+          chunk_i, n_chunks, start, end
+        ))
+      }
+    }
+  })
+
+  if (!is.null(col_names)) {
+    colnames(mu_mat) <- colnames(sd_mat) <- col_names
+  }
+
+  if (N_obs == 1L) {
+    return(list(post_mean = as.vector(mu_mat), post_sd = as.vector(sd_mat)))
+  }
+  list(post_mean = mu_mat, post_sd = sd_mat)
+}
+
 probotSamplePostNF <- function(input,
                                model,
                                n_samples = 5000,
