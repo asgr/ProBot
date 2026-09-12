@@ -15,7 +15,7 @@ including a residual location head.
 \usage{
 probotLossEval(input, output, model, mdn_components = NULL, idx = NULL,
                batch = 4096L, loss_fn = NULL, device = NULL,
-               verbose = FALSE)
+               verbose = FALSE, per_row = FALSE)
 }
 \arguments{
   \item{input}{Matrix, data frame or torch tensor of conditioning context with
@@ -48,6 +48,11 @@ probotLossEval(input, output, model, mdn_components = NULL, idx = NULL,
   already sits on, so the two always agree.}
 
   \item{verbose}{Print a one-line summary of the score.}
+
+  \item{per_row}{Also compute the loss of every individual row and return a
+  robust summary of its distribution. See \strong{Robust scoring} below. Only
+  supported for a model type's default loss; a custom \code{loss_fn} warns and
+  leaves the result as the five-field list.}
 }
 \details{
 The argument order follows \code{\link{probotDataLoader}} and
@@ -79,6 +84,23 @@ Negative values are expected for a continuous density: with many dimensions the
 log-Jacobian term of a flow, or the log-normalisation of an MDN, can outweigh
 the penalty, so the absolute level carries no meaning. Only the gap between two
 scores on the same data does.
+
+\strong{Robust scoring.} \code{loss} is a \emph{mean} over rows, and a
+negative log-likelihood has no upper bound, so a single unusual row can move it
+by orders of magnitude without saying anything about the model. For a flow,
+\code{loss = -log p(theta|x)} decomposes as
+\code{0.5 * ||z||^2 + (D/2) * log(2*pi) - log|det J|}, and the first term grows
+quadratically in the latent norm: one observation whose context sits far enough
+off the training support to reach \code{||z|| ~ 6000} contributes
+\code{1.8e7 / n} to the batch mean. A mean is the wrong summary for that
+distribution, which is why \code{per_row = TRUE} reports the median, spread and
+maximum alongside it, plus a count of rows beyond 10 MADs of the median. A mean
+far above the median with \code{n_extreme > 0} indicates tail rows, not a model
+regression.
+
+The summary needs a second forward pass for a flow, because
+\code{\link{probotLossNF}} returns only the reduced mean, so the feature is
+opt-in.
 }
 \value{
 A list with components
@@ -88,6 +110,22 @@ A list with components
   \item{model_type}{One of \code{"mdn"}, \code{"point"} or \code{"flow"}.}
   \item{loss_name}{Name of the loss function that produced \code{loss}, or
   \code{"<custom>"} for an unrecognised one.}
+
+When \code{per_row = TRUE} and the loss is a model type's default, the list
+additionally carries
+  \item{loss_median}{Median per-row loss -- the robust centre.}
+  \item{loss_p90}{90th percentile of the per-row losses.}
+  \item{loss_max}{Worst single row.}
+  \item{loss_mad}{Median absolute deviation of the per-row losses, rescaled to
+  an sd under normality. \code{NA} when the median is not finite or the spread
+  is zero.}
+  \item{extreme_threshold}{\code{loss_median + 10 * loss_mad}; \code{Inf} when
+  \code{loss_mad} is not usable.}
+  \item{n_extreme}{Rows above \code{extreme_threshold}. A small count with a
+  large gap between \code{loss} and \code{loss_median} means the mean is being
+  driven by those rows.}
+  \item{row_loss}{Numeric vector of the loss of each scored row, in the order
+  they were scored (so indexed by \code{idx} when supplied).}
 }
 \references{
 See \code{\link{probotLoss}} for the underlying batch loss functions, and
@@ -123,5 +161,14 @@ if (requireNamespace("torch", quietly = TRUE)) {
     probotLossEval(x, theta, point, idx = 1:50)$loss,
     probotLossEval(x[1:50, ], theta[1:50, ], point)$loss
   )
+
+  # A mean NLL can be dominated by one bad row. per_row = TRUE exposes that.
+  full <- probotLossEval(x, theta, flow, per_row = TRUE)
+  c(mean = full$loss, median = full$loss_median, max = full$loss_max,
+    n_extreme = full$n_extreme)
+
+  # Rows whose loss sits 10 MADs above the median, i.e. the tail rows that
+  # would drag the mean without changing the median at all.
+  which(full$row_loss > full$extreme_threshold)
 }
 }

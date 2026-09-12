@@ -305,10 +305,14 @@ test_that("probotSigmaPostNF returns mean/sd matrices with names", {
   expect_true(all(is.finite(unlist(r))))
   expect_true(all(r$post_sd >= 0))
 
-  # A vector input must collapse to length-D vectors, matching row 1.
+  # A vector input must collapse to length-D vectors, matching row 1. The
+  # tolerance is generous because the two calls invert differently shaped
+  # batches, and torch selects different float32 GEMM kernels per shape: the
+  # observed single-vs-20-row disagreement reached 2.6e-05 relative. A genuine
+  # mismatch (wrong row, wrong axis) is O(1), so 1e-3 still catches it.
   r1 <- probotSigmaPostNF(X[1, ], mdl, output_dim = 3, col_names = c("A", "B", "C"))
-  expect_equal(r1$post_sd, as.vector(r$post_sd[1, ]), tolerance = 1e-5)
-  expect_equal(r1$post_mean, as.vector(r$post_mean[1, ]), tolerance = 1e-5)
+  expect_equal(r1$post_sd, as.vector(r$post_sd[1, ]), tolerance = 1e-3)
+  expect_equal(r1$post_mean, as.vector(r$post_mean[1, ]), tolerance = 1e-3)
 })
 
 test_that("probotSigmaPostNF sd is exactly the Jacobian row norm", {
@@ -339,13 +343,19 @@ test_that("probotSigmaPostNF sd is exactly the Jacobian row norm", {
 })
 
 test_that("probotSigmaPostNF centre matches point_estimate = TRUE", {
+  # Mathematically the same quantity: both return the inverse at z = 0. They are
+  # computed on differently shaped batches though, so float32 kernel choice
+  # differs. Measured worst-case relative disagreement by style was 1.3e-06
+  # (realnvp), 2.6e-05 (maf) and 6.7e-04 (nsf, whose piecewise-linear spline
+  # derivative is the noisiest), hence 1e-2 -- still orders of magnitude below
+  # the O(1) gap that would appear if the two ever disagreed about the maths.
   for (style in c("realnvp", "maf", "nsf")) {
     mdl <- sigma_test_flow(style)
     X <- matrix(rnorm(12 * 2), 12, 2)
     r <- probotSigmaPostNF(X, mdl, output_dim = 3)
     pe <- probotSamplePostNF(X, mdl, output_dim = 3, point_estimate = TRUE)
     expect_equal(as.vector(r$post_mean), as.vector(pe),
-                 tolerance = 1e-6, info = style)
+                 tolerance = 1e-2, info = style)
   }
 })
 
