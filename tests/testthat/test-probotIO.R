@@ -110,11 +110,11 @@ test_that("mdn save-load round-trip preserves predictions", {
   probotSave(mdl, filename = tmp)
 
   inp <- matrix(rnorm(5 * 3), 5, 3)
-  pred_orig <- probotPredictMDN(inp, mdl, 3)
+  pred_orig <- probotPredictMDN(inp, mdl)
 
   res <- probotLoad(tmp)
   res$model$eval()
-  pred_loaded <- probotPredictMDN(inp, res$model, 3)
+  pred_loaded <- probotPredictMDN(inp, res$model)
 
   expect_equal(
     as.array(pred_orig$mu$to(device = "cpu")),
@@ -410,6 +410,17 @@ test_that("probotSave refuses more than four positional arguments", {
   expect_silent(probotSave(mdl, filename = tmp))
   # do.call() with an all-named list reports no positional arguments.
   expect_silent(do.call(probotSave, list(model = mdl, filename = tmp)))
+
+  # Four positional arguments followed by named ones is exactly at the limit.
+  # names(sys.call()) carries an empty entry for the function name itself, so a
+  # counter that forgets to drop slot 1 reports this legal call as 5-positional
+  # and refuses it.
+  expect_silent(probotSave(mdl, NULL, tmp, "mdn", col_means = c(0, 0),
+                           col_sds = c(1, 1)))
+  expect_silent(probotSave(mdl, NULL, tmp, "mdn", training_history = NULL))
+  # One positional too many in the same mixed style is still refused.
+  expect_error(probotSave(mdl, NULL, tmp, "mdn", c(0, 0), col_sds = c(1, 1)),
+               "only 4 arguments")
 })
 
 test_that("probotSave always writes the full architecture key set", {

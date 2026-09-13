@@ -17,13 +17,17 @@
 probotLossEval <- function(input,
                            output,
                            model,
-                           mdn_components = NULL,
                            idx = NULL,
                            batch = 4096L,
                            loss_fn = NULL,
                            device = NULL,
                            verbose = FALSE,
                            per_row = FALSE) {
+
+  # mdn_components was the fourth formal and idx the fifth, so a legacy
+  # positional count (e.g. 3) would land on idx and silently score one row.
+  # Refuse it instead.
+  .probotPositionalLimit(3L, "input, output, model")
 
   if (!inherits(model, "nn_module")) {
     stop("'model' must be an nn_module (e.g. from probotMakeMDN, probotMakePoint ",
@@ -61,23 +65,12 @@ probotLossEval <- function(input,
     stop("No rows to score (n = 0).", call. = FALSE)
   }
 
-  # Only an MDN has a mixture count, but callers comparing model types pass the
-  # same arguments to each, so a foreign mdn_components is ignored quietly -- as
-  # .probotPostSampler() does in probotPIT/probotCRPS/probotTARP.
-  if (model_type == "mdn" && is.null(mdn_components)) {
-    mdn_components <- model$mdn_components
-  }
-
   # All three model types describe p(output | input) and take the D targets, so
   # the expected target width is simply the stored output_dim. Hand-built or
   # pre-0.7.0 modules may not carry one, which is why this stays a guard rather
   # than a requirement.
   width_guard <- model$output_dim
   .probotLossEvalCheckDims(ncol(x), ncol(y), model, width_guard)
-
-  if (model_type == "mdn" && is.null(mdn_components)) {
-    stop("'mdn_components' is required for MDN models.", call. = FALSE)
-  }
 
   default_loss <- switch(model_type,
     mdn   = probotLossMDN,
@@ -145,8 +138,7 @@ probotLossEval <- function(input,
         {
           pred <- model(xb)
           if (model_type == "mdn") {
-            loss_fn(output_true = yb, output_pred = pred,
-                    mdn_components = mdn_components)
+            loss_fn(output_true = yb, output_pred = pred, model = model)
           } else {
             loss_fn(pred, yb)
           }
@@ -163,7 +155,7 @@ probotLossEval <- function(input,
       # log|det J| are not returned by probotLossNF, so it scores a second pass.
       if (collect_rows) {
         row_loss[s:(s + b - 1L)] <- .probotLossEvalRows(model_type, xb, yb, model,
-                                                        mdn_components, pred)
+                                                        pred)
       }
     }
   })
@@ -206,7 +198,7 @@ probotLossEval <- function(input,
 # ~0.5*||z||^2 / n to a batch mean. Splitting the two terms also separates a
 # genuine density failure (huge ||z||^2) from a Jacobian failure (huge |logdet|),
 # which the scalar loss cannot.
-.probotLossEvalRows <- function(model_type, xb, yb, model, mdn_components, pred) {
+.probotLossEvalRows <- function(model_type, xb, yb, model, pred) {
   if (model_type == "flow") {
     out <- model$forward(yb, xb)
     z2 <- (out$z^2)$sum(dim = 2)
@@ -217,7 +209,8 @@ probotLossEval <- function(input,
     ldj <- out$log_det_jac$squeeze(2)
     as.numeric((z2 + d * log(2 * pi)) * 0.5 - ldj)
   } else if (model_type == "mdn") {
-    p <- .probotUnpackMDN(pred, mdn_components)
+    p <- .probotUnpackMDN(pred, model)
+    mdn_components <- p$mu$size(2)
     # The clamped value is used for both sigma and the log-normalisation, exactly
     # as probotLossMDN does; using the raw log10_sigma there would silently
     # disagree with the reported scalar whenever the clamp binds.

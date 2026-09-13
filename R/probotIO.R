@@ -368,18 +368,7 @@ probotSave <- function(
   # scaling-metadata slots: a legacy call written as
   # probotSave(model, opt, file, "mdn", mdn_components, input_dim, output_dim)
   # would bind mdn_components to col_means. Refuse it rather than mis-file it.
-  # names() is NULL when every argument is positional, which must not count as
-  # zero (`%in% NULL` is always FALSE).
-  sc <- sys.call()
-  snm <- names(sc)
-  n_positional <- if (is.null(snm)) length(sc) - 1L else sum(snm == "" | is.na(snm))
-  safe_positional <- 4L
-  if (n_positional > safe_positional) {
-    stop("probotSave(): only ", safe_positional, " arguments (model, optimizer, ",
-         "filename, model_type) may be given positionally; everything after them ",
-         "must be named. This call passed ", n_positional, " by position.",
-         call. = FALSE)
-  }
+  .probotPositionalLimit(4L, "model, optimizer, filename, model_type")
 
   dots <- list(...)
   retired <- intersect(names(dots), .probotInferredFields)

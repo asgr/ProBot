@@ -12,7 +12,6 @@ MDN outputs.
 probotSamplePostMDN(
   input,
   model,
-  mdn_components,
   n_samples = 5000,
   col_means = NULL,
   col_sds = NULL,
@@ -32,8 +31,6 @@ probotMarginalPostMDN(mdn_output, col_means, col_sds, col_names = NULL)
 
   \item{model}{An instantiated MDN \code{\link[torch]{nn_module}} object (e.g., from
   \code{\link{probotMakeMDN}}). The model is set to evaluation mode automatically.}
-
-  \item{mdn_components}{Number of mixture components used when the model was trained.}
 
   \item{n_samples}{Number of posterior samples to draw per observation. Defaults to 5000.}
 
@@ -71,6 +68,12 @@ back-transformed to physical units.
 All randomness comes from the R global RNG, so calling \code{\link{set.seed}} beforehand
 makes the draws reproducible.
 
+The number of mixture components is read from \code{model}, not passed by the caller:
+an MDN head emits \code{K * (2D + 1)} values, which does not identify \code{K} and
+\code{D} separately. Because \code{mdn_components} used to be the third formal, calls
+that pass it positionally would now bind it to \code{n_samples}, so only \code{input}
+and \code{model} may be given positionally and everything later must be named.
+
 Observations are processed in chunks of \code{batch_size} rows, which bounds the
 intermediate working set. The full output array (roughly 8 bytes per element of
 \code{n_samples * D * N}) is allocated up front and dominates memory when sampling many
@@ -107,7 +110,6 @@ if (requireNamespace("torch", quietly = TRUE)) {
   draws <- probotSamplePostMDN(
     input = x[1, ],
     model = model,
-    mdn_components = 2,
     n_samples = 20,
     col_means = 0,
     col_sds = 1,
@@ -116,11 +118,11 @@ if (requireNamespace("torch", quietly = TRUE)) {
   dim(draws)
 
   # Multiple observations: an (n_samples x 1 x nrow) array out
-  many <- probotSamplePostMDN(x, model, mdn_components = 2, n_samples = 20)
+  many <- probotSamplePostMDN(x, model, n_samples = 20)
   dim(many)
 
   # The marginal summary still works from a precomputed prediction
-  pred <- probotPredictMDN(x, model, mdn_components = 2)
+  pred <- probotPredictMDN(x, model)
   marg <- probotMarginalPostMDN(
     mdn_output = pred,
     col_means = 0,

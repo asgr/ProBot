@@ -1,31 +1,8 @@
-.mixture_sd <- function(means, sds, weights) {
-  # 1. Ensure weights sum to 1
-  if (sum(weights) != 1) {
-    weights <- weights / sum(weights)
-  }
+probotPredictMDN <- function(input, model, device = NULL){
 
-  # 2. Calculate the combined mean (mu)
-  combined_mean <- sum(weights * means)
-
-  # 3. Calculate individual variances
-  variances <- sds^2
-
-  # 4. Calculate the combined variance (Law of Total Variance)
-  #    It sums the weighted variances and the weighted squared differences from the mean
-  combined_variance <- sum(weights * (variances + (means - combined_mean)^2))
-
-  # 5. Calculate the combined standard deviation
-  combined_sd <- sqrt(combined_variance)
-
-  # Return the results as a named list
-  return(list(
-    mean = combined_mean,
-    variance = combined_variance,
-    sd = combined_sd
-  ))
-}
-
-probotPredictMDN <- function(input, model, mdn_components, device = NULL){
+  # A legacy positional mdn_components now lands on `device`; a scalar would
+  # fail inside torch_device() without naming the real cause.
+  .probotPositionalLimit(2L, "input, model")
 
   if (is.null(device)) {
     if (length(model$parameters) > 0) {
@@ -47,13 +24,12 @@ probotPredictMDN <- function(input, model, mdn_components, device = NULL){
     )
   })
 
-  .probotUnpackMDN(output, mdn_components)
+  .probotUnpackMDN(output, model)
 }
 
 probotSamplePostMDN <- function(
     input,
     model,
-    mdn_components,
     n_samples = 5000,
     col_means = NULL,
     col_sds = NULL,
@@ -69,6 +45,10 @@ probotSamplePostMDN <- function(
   # (n_samples, output_dim) matrix; a multi-row matrix returns the
   # (n_samples, output_dim, N_obs) array.
   # ------------------------------------------------------------------
+
+  # A legacy positional mdn_components would otherwise bind to n_samples and
+  # quietly return that many draws.
+  .probotPositionalLimit(2L, "input, model")
 
   if (!is.null(col_means) && is.null(col_sds)) {
     stop("col_sds must be provided when col_means is provided.")
@@ -148,7 +128,6 @@ probotSamplePostMDN <- function(
     pred <- probotPredictMDN(
       input = input$narrow(1, start, B),
       model = model,
-      mdn_components = mdn_components,
       device = device
     )
 
@@ -157,6 +136,8 @@ probotSamplePostMDN <- function(
     log10_sigma <- as.array(pred$log10_sigma$cpu())
 
     weights <- as.matrix(nnf_softmax(pred$logits, dim = 2)$cpu())
+
+    K <- dim(mu)[2]
 
     # Soft clamp matches probotLossMDN()/probotMarginalPostMDN(): sigma is
     # capped at 1e5 rather than allowed to run away with an unbounded head.
@@ -183,11 +164,11 @@ probotSamplePostMDN <- function(
 
     # (B, D) slice per component; matrix() guard keeps shape when B == 1.
     mu_comp <- lapply(
-      seq_len(mdn_components),
+      seq_len(K),
       function(k) matrix(mu[, k, ], nrow = B, ncol = D)
     )
     sigma_comp <- lapply(
-      seq_len(mdn_components),
+      seq_len(K),
       function(k) matrix(sigma[, k, ], nrow = B, ncol = D)
     )
 
@@ -198,7 +179,7 @@ probotSamplePostMDN <- function(
     for (b in seq_len(B)) {
       rows <- seq((b - 1L) * n_samples + 1L, b * n_samples)
       comp[rows] <- sample.int(
-        mdn_components,
+        K,
         size = n_samples,
         replace = TRUE,
         prob = weights[b, ]
@@ -207,7 +188,7 @@ probotSamplePostMDN <- function(
 
     theta <- matrix(NA_real_, B * n_samples, D)
 
-    for (k in seq_len(mdn_components)) {
+    for (k in seq_len(K)) {
 
       idx <- which(comp == k)
 

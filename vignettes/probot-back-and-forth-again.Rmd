@@ -161,7 +161,6 @@ forward_fit <- probotTrainMDN(
   dataloader     = forward_loader,
   optimizer      = forward_optimizer,
   epochs         = 100,
-  mdn_components = 5,
   verbose        = TRUE,
   early_stop     = FALSE,
   stop_window    = 5,
@@ -194,8 +193,7 @@ params_test_scaled <- probotScaleForward(
 
 forward_pred <- probotPredictMDN(
   input          = params_test_scaled,
-  model          = forward_fit$model,
-  mdn_components = 5
+  model          = forward_fit$model
 )
 
 forward_summary <- probotMarginalPostMDN(
@@ -253,7 +251,6 @@ representation of what the MDN has learned.
 fwd_post_samples <- probotSamplePostMDN(
   input          = params_test_scaled[1, ],
   model          = forward_fit$model,
-  mdn_components = 5,
   n_samples      = 2000,
   col_means      = attr(stats_scaled, "col_scale")$col_means,
   col_sds        = attr(stats_scaled, "col_scale")$col_sds,
@@ -276,7 +273,6 @@ Well-calibrated samples should scatter symmetrically around the truth.
 PIT_forward <- probotPIT(
   input          = params_test_scaled,
   model          = forward_fit$model,
-  mdn_components = 5,
   params         = stats_test,
   col_means      = attr(stats_scaled, "col_scale")$col_means,
   col_sds        = attr(stats_scaled, "col_scale")$col_sds,
@@ -299,7 +295,6 @@ a posterior that is too wide.
 TARP_forward <- probotTARP(
   input          = params_test_scaled,
   model          = forward_fit$model,
-  mdn_components = 5,
   params         = stats_test,
   col_means      = attr(stats_scaled, "col_scale")$col_means,
   col_sds        = attr(stats_scaled, "col_scale")$col_sds,
@@ -372,7 +367,6 @@ inverse_fit <- probotTrainMDN(
   dataloader     = inverse_loader,
   optimizer      = inverse_optimizer,
   epochs         = 100,
-  mdn_components = 5,
   verbose        = TRUE,
   early_stop     = FALSE,
   stop_window    = 5,
@@ -406,8 +400,7 @@ stats_test_scaled <- probotScaleForward(
 
 inverse_pred <- probotPredictMDN(
   input          = stats_test_scaled,
-  model          = inverse_fit$model,
-  mdn_components = 5
+  model          = inverse_fit$model
 )
 
 inverse_summary <- probotMarginalPostMDN(
@@ -461,7 +454,6 @@ here.
 inv_post_samples <- probotSamplePostMDN(
   input          = stats_test_scaled[1, ],
   model          = inverse_fit$model,
-  mdn_components = 5,
   n_samples      = 2000,
   col_means      = attr(params_scaled, "col_scale")$col_means,
   col_sds        = attr(params_scaled, "col_scale")$col_sds,
@@ -502,7 +494,6 @@ approximately reproduce the prior for those dimensions.
 PIT_inverse <- probotPIT(
   input          = stats_test_scaled,
   model          = inverse_fit$model,
-  mdn_components = 5,
   params         = params_test,
   col_means      = attr(params_scaled, "col_scale")$col_means,
   col_sds        = attr(params_scaled, "col_scale")$col_sds,
@@ -524,7 +515,6 @@ well calibrated even though those marginals may be very broad.
 TARP_inverse <- probotTARP(
   input          = stats_test_scaled,
   model          = inverse_fit$model,
-  mdn_components = 5,
   params         = params_test,
   col_means      = attr(params_scaled, "col_scale")$col_means,
   col_sds        = attr(params_scaled, "col_scale")$col_sds,

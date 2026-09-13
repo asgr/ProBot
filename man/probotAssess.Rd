@@ -1,4 +1,5 @@
 \name{probotAssess}
+\alias{probotAssess}
 \alias{probotCRPS}
 \alias{probotPIT}
 \alias{probotTARP}
@@ -14,7 +15,6 @@ Random Points coverage values.
 probotCRPS(
   input,
   model,
-  mdn_components = NULL,
   params,
   n_test = NULL,
   n_samples = 1e4,
@@ -28,7 +28,6 @@ probotCRPS(
 probotPIT(
   input,
   model,
-  mdn_components = NULL,
   params,
   n_test = NULL,
   n_samples = 1e4,
@@ -42,7 +41,6 @@ probotPIT(
 probotTARP(
   input,
   model,
-  mdn_components = NULL,
   params,
   n_test = NULL,
   n_samples = 1e4,
@@ -63,10 +61,8 @@ probotTARP(
     MDN (from \code{\link{probotMakeMDN}}) or a normalising flow (from
     \code{\link{probotMakeFlow}}, \code{\link{probotFlowRealNVP}},
     \code{\link{probotFlowMAF}} or \code{\link{probotFlowNSF}}). The model class
-    decides which sampler is used.}
-
-  \item{mdn_components}{Number of mixture components used when \code{model} was
-    trained. Required for MDNs; ignored (and may be left \code{NULL}) for flows.}
+    decides which sampler is used, and an MDN supplies its own number of mixture
+    components, so nothing extra is needed to describe the posterior shape.}
 
   \item{params}{Numeric matrix of shape \eqn{n_\text{test} \times n_\text{params}}
     containing the true parameter values for each test observation. The number of
@@ -151,7 +147,14 @@ probotTARP(
   All three functions sample the first \code{n_test} rows of \code{input} with
   the sampler that matches \code{model}:
   \code{\link{probotSamplePostMDN}} for MDNs,
-  \code{\link{probotSamplePostNF}} for flows. Sampling proceeds in chunks of
+  \code{\link{probotSamplePostNF}} for flows. Nothing else about the posterior
+  has to be declared: an MDN's head is read through \code{model}, whose stored
+  \code{mdn_components} and \code{output_dim} resolve the
+  \code{K * (2D + 1)} output width into \eqn{K} and \eqn{D} (the width alone is
+  ambiguous). \code{params} used to be the fourth formal, behind
+  \code{mdn_components}; a call that still passes a count by position puts it in
+  \code{params} and is rejected by name rather than silently misread.
+  Sampling proceeds in chunks of
   \code{batch_size} observations, so only one
   \eqn{n\_samples \times D \times \text{chunk}}{n_samples x D x chunk} array of
   draws is held in memory at a time, and the statistics above are computed
@@ -204,7 +207,6 @@ if (requireNamespace("torch", quietly = TRUE)) {
   crps <- probotCRPS(
     input = x,
     model = model,
-    mdn_components = 3,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -218,7 +220,6 @@ if (requireNamespace("torch", quietly = TRUE)) {
   pit <- probotPIT(
     input = x,
     model = model,
-    mdn_components = 3,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -232,7 +233,6 @@ if (requireNamespace("torch", quietly = TRUE)) {
   tarp <- probotTARP(
     input = x,
     model = model,
-    mdn_components = 3,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -241,8 +241,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   )
   length(tarp)
 
-  # The same three calls work unchanged on a normalising flow, with
-  # mdn_components left out.
+  # The same three calls work unchanged on a normalising flow.
   flow <- probotMakeFlow(input_dim = 2, output_dim = 2, n_layers = 2,
                          hidden_dim = 16, device = "cpu")()
 

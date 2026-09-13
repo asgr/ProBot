@@ -302,7 +302,9 @@ for (j in seq_len(ncol(theta_test))) {
 `probotPIT()`, `probotTARP()` and `probotCRPS()` work on flows exactly as they do
 on MDNs: they read the model class, dispatch to `probotSamplePostNF()` instead of
 `probotSamplePostMDN()`, and sample in batches rather than one observation at a
-time. The only interface difference is that `mdn_components` is left out.
+time. There is no interface difference at all — an MDN's number of mixture
+components is read from the model, so nothing describes the posterior shape by
+hand.
 
 ```{r assess-args, eval = eval_global}
 flow_scale <- attr(input_scaled, "col_scale")

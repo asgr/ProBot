@@ -1,14 +1,14 @@
 probotLossMDN <- function(
     output_true,
     output_pred,
-    mdn_components
+    model
 ){
 
   if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
 
   output_dim <- output_true$size(2)
 
-  p <- .probotUnpackMDN(output_pred, mdn_components)
+  p <- .probotUnpackMDN(output_pred, model)
 
   mu <- p$mu
 
@@ -18,7 +18,7 @@ probotLossMDN <- function(
 
   y_true <- output_true$unsqueeze(2)
 
-  y_true <- y_true$expand(c(y_true$size(1), mdn_components, output_dim))
+  y_true <- y_true$expand(c(y_true$size(1), p$mu$size(2), output_dim))
 
   z <- (y_true - mu) / sigma
 
@@ -55,7 +55,7 @@ probotLossNF <- function(output_true, output_pred, model) {
 probotLossMSE <- function(
     output_true,
     output_pred,
-    mdn_components
+    model
 ) {
   # Ensure output_true has dimensions (batch_size, output_dim)
   if (length(output_true$shape) == 1) {
@@ -63,7 +63,7 @@ probotLossMSE <- function(
   }
 
   # Unpack the raw network output into MDN parameters
-  p <- .probotUnpackMDN(output_pred, mdn_components)
+  p <- .probotUnpackMDN(output_pred, model)
 
   # Convert logits to normalized component weights
   weights <- nnf_softmax(p$logits, dim = 2)
@@ -78,11 +78,11 @@ probotLossMSE <- function(
 probotLossMAE <- function(
     output_true,
     output_pred,
-    mdn_components
+    model
 ) {
   if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
   
-  p <- .probotUnpackMDN(output_pred, mdn_components)
+  p <- .probotUnpackMDN(output_pred, model)
   weights <- nnf_softmax(p$logits, dim = 2)
   mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
   
@@ -92,11 +92,11 @@ probotLossMAE <- function(
 probotLossMAPE <- function(
     output_true,
     output_pred, 
-    mdn_components
+    model
 ) {
   if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
   
-  p <- .probotUnpackMDN(output_pred, mdn_components)
+  p <- .probotUnpackMDN(output_pred, model)
   weights <- nnf_softmax(p$logits, dim = 2)
   mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
   
@@ -110,12 +110,12 @@ probotLossMAPE <- function(
 probotLossHuber <- function(
     output_true, 
     output_pred, 
-    mdn_components, 
+    model, 
     delta = 1.0
 ) {
   if (length(output_true$shape) == 1) output_true <- output_true$unsqueeze(2)
   
-  p <- .probotUnpackMDN(output_pred, mdn_components)
+  p <- .probotUnpackMDN(output_pred, model)
   weights <- nnf_softmax(p$logits, dim = 2)
   mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
   

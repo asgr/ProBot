@@ -1,7 +1,6 @@
 probotPIT <- function(
     input,
     model,
-    mdn_components = NULL,
     params,
     n_test = NULL,
     n_samples = 1e4,
@@ -12,9 +11,10 @@ probotPIT <- function(
     verbose = TRUE
 ){
 
-  n_test <- .probotNTest(n_test, params)
+  # Validate params first: a legacy positional mdn_components lands here.
+  n_params <- .probotNParams(params)
 
-  n_params <- ncol(params)
+  n_test <- .probotNTest(n_test, params)
 
   pit <- matrix(
     NA_real_,
@@ -32,7 +32,7 @@ probotPIT <- function(
   # rather than n_test.
   .probotChunkApply(
     input = input, n_test = n_test, model = model,
-    mdn_components = mdn_components, output_dim = n_params,
+    output_dim = n_params,
     n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
     batch_size = batch_size, verbose = verbose, label = "probotPIT",
@@ -54,7 +54,6 @@ probotPIT <- function(
 probotTARP <- function(
     input,
     model,
-    mdn_components = NULL,
     params,
     n_test = NULL,
     n_samples = 1e4,
@@ -65,9 +64,10 @@ probotTARP <- function(
     verbose = TRUE
 ){
 
-  n_test <- .probotNTest(n_test, params)
+  # Validate params first: a legacy positional mdn_components lands here.
+  n_params <- .probotNParams(params)
 
-  n_params <- ncol(params)
+  n_test <- .probotNTest(n_test, params)
 
   tarp <- numeric(n_test)
 
@@ -77,7 +77,7 @@ probotTARP <- function(
 
   .probotChunkApply(
     input = input, n_test = n_test, model = model,
-    mdn_components = mdn_components, output_dim = n_params,
+    output_dim = n_params,
     n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
     batch_size = batch_size, verbose = verbose, label = "probotTARP",
@@ -117,7 +117,6 @@ probotTARP <- function(
 probotCRPS <- function(
     input,
     model,
-    mdn_components = NULL,
     params,
     n_test = NULL,
     n_samples = 1e4,
@@ -128,9 +127,10 @@ probotCRPS <- function(
     verbose = TRUE
 ){
 
-  n_test <- .probotNTest(n_test, params)
+  # Validate params first: a legacy positional mdn_components lands here.
+  n_params <- .probotNParams(params)
 
-  n_params <- ncol(params)
+  n_test <- .probotNTest(n_test, params)
 
   crps <- matrix(NA_real_, n_test, n_params)
 
@@ -143,7 +143,7 @@ probotCRPS <- function(
 
   .probotChunkApply(
     input = input, n_test = n_test, model = model,
-    mdn_components = mdn_components, output_dim = n_params,
+    output_dim = n_params,
     n_samples = n_samples,
     col_means = col_means, col_sds = col_sds, col_names = col_names,
     batch_size = batch_size, verbose = verbose, label = "probotCRPS",
@@ -166,6 +166,25 @@ probotCRPS <- function(
 # ----------------------------------------------------------------------
 # Shared internals
 # ----------------------------------------------------------------------
+
+# Validate `params` and report its width. `params` is the third formal now that
+# mdn_components has been removed, so a legacy positional call lands a scalar
+# mixture count here -- ncol() of that is NULL, which would otherwise wander
+# into the dimension guard as a confusing "arguments imply differing" error.
+.probotNParams <- function(params) {
+  if (missing(params) || is.null(params)) {
+    stop("'params' is required: the matrix of true parameter values the ",
+         "posterior samples are scored against.", call. = FALSE)
+  }
+  n_params <- ncol(params)
+  if (is.null(n_params) || n_params < 1L) {
+    stop("'params' must be a matrix or data frame with one column per ",
+         "parameter. If this call passed mdn_components by position, note that ",
+         "the argument has been removed -- the mixture count is read from the ",
+         "model.", call. = FALSE)
+  }
+  as.integer(n_params)
+}
 
 # n_test defaults to every row of params, and is capped at nrow(params).
 .probotNTest <- function(n_test, params) {
@@ -191,7 +210,7 @@ probotCRPS <- function(
 # with a common signature, so callers stay model-agnostic. A flow has no
 # mixture head to read the parameter dimension from, so output_dim must be
 # supplied; it is unused on the MDN path.
-.probotPostSampler <- function(model, mdn_components, output_dim) {
+.probotPostSampler <- function(model, output_dim) {
   if (.probotIsFlow(model)) {
     if (is.null(output_dim)) {
       stop("'output_dim' is required when sampling from a flow model.")
@@ -211,18 +230,11 @@ probotCRPS <- function(
       )
     }
   } else {
-    if (is.null(mdn_components)) {
-      stop(
-        "'mdn_components' is required for MDN models (it is ignored for ",
-        "normalising flow models)."
-      )
-    }
     function(input, n_samples, col_means, col_sds, col_names, batch_size,
              verbose) {
       probotSamplePostMDN(
         input = input,
         model = model,
-        mdn_components = mdn_components,
         n_samples = n_samples,
         col_means = col_means,
         col_sds = col_sds,
@@ -245,7 +257,6 @@ probotCRPS <- function(
     input,
     n_test,
     model,
-    mdn_components,
     output_dim,
     n_samples,
     col_means,
@@ -268,9 +279,7 @@ probotCRPS <- function(
          " for n_test = ", n_test, ").")
   }
 
-  sample_post <- .probotPostSampler(
-    model = model, mdn_components = mdn_components, output_dim = output_dim
-  )
+  sample_post <- .probotPostSampler(model = model, output_dim = output_dim)
 
   # A flow's inverse pass additionally holds (rows x widest internal layer)
   # conditioner activations, which at hidden_dim = 512 is ~160x the draw array.

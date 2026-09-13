@@ -20,7 +20,7 @@ le_fl <- probotMakeFlow(input_dim = le_C, output_dim = le_D, n_layers = 2,
 
 test_that("probotLossEval scores all three model types", {
   for (spec in list(mdn = le_mdn, point = le_pt, flow = le_fl)) {
-    res <- probotLossEval(le_x, le_y, spec, mdn_components = le_K)
+    res <- probotLossEval(le_x, le_y, spec)
     expect_type(res, "list")
     expect_named(res, c("loss", "n", "batches", "model_type", "loss_name"))
     expect_length(res$loss, 1L)
@@ -30,18 +30,18 @@ test_that("probotLossEval scores all three model types", {
 })
 
 test_that("probotLossEval dispatches the model type from the object", {
-  expect_identical(probotLossEval(le_x, le_y, le_mdn, le_K)$model_type, "mdn")
+  expect_identical(probotLossEval(le_x, le_y, le_mdn)$model_type, "mdn")
   expect_identical(probotLossEval(le_x, le_y, le_pt)$model_type, "point")
   expect_identical(probotLossEval(le_x, le_y, le_fl)$model_type, "flow")
 })
 
 test_that("probotLossEval names the loss it used", {
-  expect_identical(probotLossEval(le_x, le_y, le_mdn, le_K)$loss_name,
+  expect_identical(probotLossEval(le_x, le_y, le_mdn)$loss_name,
                    "probotLossMDN")
   expect_identical(probotLossEval(le_x, le_y, le_pt)$loss_name, "nnf_mse_loss")
   expect_identical(probotLossEval(le_x, le_y, le_fl)$loss_name, "probotLossNF")
   expect_identical(
-    probotLossEval(le_x, le_y, le_mdn, le_K, loss_fn = probotLossMAE)$loss_name,
+    probotLossEval(le_x, le_y, le_mdn, loss_fn = probotLossMAE)$loss_name,
     "probotLossMAE")
   expect_identical(
     probotLossEval(le_x, le_y, le_pt, loss_fn = function(a, b) a$mean())$loss_name,
@@ -51,9 +51,9 @@ test_that("probotLossEval names the loss it used", {
 # The point of the row weighting: an unweighted mean of per-batch losses drifts
 # whenever the final batch is short. batch = 7 does not divide 200.
 test_that("probotLossEval is invariant to batch size", {
-  one <- probotLossEval(le_x, le_y, le_mdn, le_K, batch = 1L)$loss
-  seven <- probotLossEval(le_x, le_y, le_mdn, le_K, batch = 7L)$loss
-  whole <- probotLossEval(le_x, le_y, le_mdn, le_K, batch = 1e4)$loss
+  one <- probotLossEval(le_x, le_y, le_mdn, batch = 1L)$loss
+  seven <- probotLossEval(le_x, le_y, le_mdn, batch = 7L)$loss
+  whole <- probotLossEval(le_x, le_y, le_mdn, batch = 1e4)$loss
   expect_equal(one, whole, tolerance = 1e-6)
   expect_equal(seven, whole, tolerance = 1e-6)
 
@@ -96,26 +96,34 @@ test_that("probotLossEval rejects a non-module and an unusable batch", {
   expect_error(probotLossEval(le_x, le_y, le_pt, batch = 0L), "whole number")
 })
 
-test_that("probotLossEval needs mdn_components only for an MDN", {
-  # Post-0.7.0 constructors store the count, so omitting it works.
+test_that("probotLossEval no longer takes a mixture count", {
+  # The count is read from the model, so all three types score with the same
+  # three leading arguments -- which is what a model-comparison loop needs.
   expect_true(is.finite(probotLossEval(le_x, le_y, le_mdn)$loss))
-  # A foreign mdn_components is ignored quietly, so a model-comparison loop can
-  # pass one set of arguments to every arm.
-  expect_no_warning(probotLossEval(le_x, le_y, le_pt, mdn_components = le_K))
-  expect_no_warning(probotLossEval(le_x, le_y, le_fl, mdn_components = le_K))
+  expect_true(is.finite(probotLossEval(le_x, le_y, le_pt)$loss))
+  expect_true(is.finite(probotLossEval(le_x, le_y, le_fl)$loss))
+  for (spec in list(le_mdn, le_pt, le_fl)) {
+    expect_identical(names(probotLossEval(le_x, le_y, spec)),
+                     c("loss", "n", "batches", "model_type", "loss_name"))
+  }
+  # mdn_components was the fourth formal and idx is now the fourth, so a legacy
+  # positional count would silently score one row; it must be refused outright.
+  expect_error(probotLossEval(le_x, le_y, le_mdn, le_K), "positionally")
+  expect_error(probotLossEval(le_x, le_y, le_mdn, mdn_components = le_K),
+               "unused argument")
 })
 
 # The whole point of a scoring helper is that it must not perturb the model.
 test_that("probotLossEval leaves parameters and training mode untouched", {
   before <- lapply(le_mdn$state_dict(), function(p) as.matrix(p$to(device = "cpu")))
   le_mdn$train()
-  invisible(probotLossEval(le_x, le_y, le_mdn, le_K, batch = 64L))
+  invisible(probotLossEval(le_x, le_y, le_mdn, batch = 64L))
   after <- lapply(le_mdn$state_dict(), function(p) as.matrix(p$to(device = "cpu")))
   expect_identical(before, after)
   expect_true(le_mdn$training)
 
   le_mdn$eval()
-  invisible(probotLossEval(le_x, le_y, le_mdn, le_K))
+  invisible(probotLossEval(le_x, le_y, le_mdn))
   expect_false(le_mdn$training)
 })
 
@@ -126,8 +134,8 @@ test_that("probotLossEval matches a direct single-batch loss call", {
   # copies its input to CPU and re-places it on the resolved device.
   on_dev <- function(m, model) torch_tensor(m, device = model$parameters[[1]]$device)
   expect_equal(
-    probotLossEval(le_x, le_y, le_mdn, le_K, batch = le_n)$loss,
-    probotLossMDN(on_dev(le_y, le_mdn), le_mdn(on_dev(le_x, le_mdn)), le_K)$item(),
+    probotLossEval(le_x, le_y, le_mdn, batch = le_n)$loss,
+    probotLossMDN(on_dev(le_y, le_mdn), le_mdn(on_dev(le_x, le_mdn)), le_mdn)$item(),
     tolerance = 1e-7)
   expect_equal(
     probotLossEval(le_x, le_y, le_fl, batch = le_n)$loss,
@@ -189,7 +197,7 @@ test_that("per_row defaults to FALSE and leaves the result shape alone", {
 
 test_that("per_row returns one finite loss per scored row", {
   for (spec in list(mdn = le_mdn, point = le_pt, flow = le_fl)) {
-    res <- probotLossEval(le_x, le_y, spec, mdn_components = le_K, per_row = TRUE)
+    res <- probotLossEval(le_x, le_y, spec, per_row = TRUE)
     expect_length(res$row_loss, le_n)
     expect_true(all(is.finite(res$row_loss)))
     expect_true(res$loss_median <= res$loss_p90)
@@ -202,7 +210,7 @@ test_that("per_row returns one finite loss per scored row", {
 # must be consistent: mean(row_loss) is the reported loss up to float32 error.
 test_that("per-row losses average back to the reported scalar loss", {
   for (spec in list(mdn = le_mdn, point = le_pt, flow = le_fl)) {
-    res <- probotLossEval(le_x, le_y, spec, mdn_components = le_K, per_row = TRUE)
+    res <- probotLossEval(le_x, le_y, spec, per_row = TRUE)
     expect_equal(mean(res$row_loss), res$loss, tolerance = 1e-5)
   }
 })
@@ -237,10 +245,10 @@ test_that("per_row agrees with the scalar loss when the MDN sigma clamp binds", 
     head$bias$add_(mask_t$mul_(8))
   })
   raw <- .probotUnpackMDN(
-    big(torch_tensor(le_x, device = dev)), le_K)$log10_sigma
+    big(torch_tensor(le_x, device = dev)), big)$log10_sigma
   expect_gt(as.numeric(torch_min(torch_abs(raw))), 5)
 
-  res <- probotLossEval(le_x, le_y, big, le_K, per_row = TRUE)
+  res <- probotLossEval(le_x, le_y, big, per_row = TRUE)
   expect_true(all(is.finite(res$row_loss)))
   expect_equal(mean(res$row_loss), res$loss, tolerance = 1e-5)
 })
@@ -281,7 +289,7 @@ test_that("per_row flags a single tail row that dominates the mean", {
 
 test_that("a non-decomposable loss_fn warns and omits the summary", {
   expect_warning(
-    res <- probotLossEval(le_x, le_y, le_mdn, le_K,
+    res <- probotLossEval(le_x, le_y, le_mdn,
                           loss_fn = probotLossMAE, per_row = TRUE),
     "default loss")
   expect_named(res, c("loss", "n", "batches", "model_type", "loss_name"))

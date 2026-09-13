@@ -13,7 +13,7 @@ Point and normalising flow models, and for all three flow architectures
 including a residual location head.
 }
 \usage{
-probotLossEval(input, output, model, mdn_components = NULL, idx = NULL,
+probotLossEval(input, output, model, idx = NULL,
                batch = 4096L, loss_fn = NULL, device = NULL,
                verbose = FALSE, per_row = FALSE)
 }
@@ -29,9 +29,6 @@ probotLossEval(input, output, model, mdn_components = NULL, idx = NULL,
   \code{\link{probotMakePoint}}, \code{\link{probotMakeFlow}} or
   \code{\link{probotLoad}}.}
 
-  \item{mdn_components}{Number of Gaussian mixture components. Required for an
-  MDN whose constructor did not store it, and ignored otherwise.}
-
   \item{idx}{Optional integer vector of rows of \code{input} and \code{output}
   to score. Equivalent to subsetting both matrices beforehand, and the more
   memory-efficient route for a large matrix that is already in RAM.}
@@ -40,9 +37,11 @@ probotLossEval(input, output, model, mdn_components = NULL, idx = NULL,
   it does not depend on this value beyond float32 rounding.}
 
   \item{loss_fn}{Scoring function. Defaults to \code{\link{probotLossMDN}} for
-  an MDN, \code{\link{torch::nnf_mse_loss}} for a Point model and
-  \code{\link{probotLossNF}} for a flow, matching the trainers' defaults. Any
-  function with the same signature as one of those may be supplied.}
+  an MDN, \code{\link[torch:nnf_mse_loss]{nnf_mse_loss}} for a Point model and
+  \code{\link{probotLossNF}} for a flow, matching the trainers' defaults. For an
+  MDN or a flow, a replacement must accept \code{output_true},
+  \code{output_pred} and \code{model} (named as such); a Point model is scored
+  with the plain two-argument \code{(pred, true)} form.}
 
   \item{device}{Where to place the tensors. Defaults to the device the model
   already sits on, so the two always agree.}
@@ -64,6 +63,13 @@ checked against the column counts and an error names the swap.
 
 A bare vector is read as one column of values, not as a single observation; pass
 \code{matrix(x, nrow = 1)} for one row of context.
+
+The number of mixture components is read from the model, so it is not an
+argument here and the same three leading arguments score every model type.
+Because \code{mdn_components} used to be the fourth formal and \code{idx} is now
+the fourth, a call that still passes a count positionally would silently score a
+single row; only \code{input}, \code{output} and \code{model} may be given by
+position, and anything later must be named.
 
 For a Point model the underlying \code{torch::nnf_mse_loss()} averages over
 \emph{elements}, not rows, and requires the model's output layer to be as wide

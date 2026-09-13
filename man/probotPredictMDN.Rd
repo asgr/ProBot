@@ -5,14 +5,12 @@
 Pass input features through a trained MDN and unpack the raw network output into separate \code{logits}, \code{mu}, and \code{log10_sigma} tensors for downstream sampling or evaluation.
 }
 \usage{
-probotPredictMDN(input, model, mdn_components, device = NULL)
+probotPredictMDN(input, model, device = NULL)
 }
 \arguments{
   \item{input}{Numeric matrix of input features (rows = observations).}
 
   \item{model}{An instantiated MDN \code{\link[torch]{nn_module}} object.}
-
-  \item{mdn_components}{Number of mixture components used when the model was trained.}
 
   \item{device}{Character string or \code{\link[torch]{torch_device}} object specifying
    the computing device: \code{"cpu"}, \code{"cuda"}, or \code{"mps"}. If \code{NULL}
@@ -22,7 +20,12 @@ probotPredictMDN(input, model, mdn_components, device = NULL)
 \details{
 The model is set to evaluation mode (\code{model$eval}) and predictions
 are computed inside a \code{\link[torch]{with_no_grad}} block. The raw network output
-is unpacked by the internal \code{.probotUnpackMDN()} helper.
+is unpacked by the internal \code{.probotUnpackMDN()} helper, which reads the
+number of mixture components off \code{model} rather than taking it as an
+argument (see \code{\link{probotMakeMDN}}). Calls that used to pass
+\code{mdn_components} by position would now bind it to \code{device}, so only
+\code{input} and \code{model} may be given positionally; anything later must be
+named.
 
 When \code{device = NULL} (default), the input tensor is automatically placed on the
 same device as the model, eliminating device mismatch errors. Pass an explicit device
@@ -38,8 +41,9 @@ A list containing:
     \item \code{mu}: Tensor of shape \eqn{n \times K \times D} (component means).
     \item \code{log10_sigma}: Tensor of shape \eqn{n \times K \times D} (log10 component scales).
   }
-  where \eqn{n} is the number of observations, \eqn{K} is \code{mdn_components},
-  and \eqn{D} is \code{output_dim}.
+  where \eqn{n} is the number of observations, \eqn{K} is the model's stored
+  \code{mdn_components} and \eqn{D} its \code{output_dim} (see
+  \code{\link{probotMakeMDN}}).
 }
 \author{
 Aaron Robotham
@@ -56,7 +60,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   x <- matrix(rnorm(20), ncol = 2)
 
    # Device auto-detected from model
-  pred <- probotPredictMDN(x, model, mdn_components = 3)
+  pred <- probotPredictMDN(x, model)
 
   names(pred)
 }

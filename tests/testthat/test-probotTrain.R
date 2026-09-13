@@ -15,7 +15,7 @@ test_that("probotSingleEpochMDN runs without error", {
   opt <- optim_adam(mdl$parameters, lr = 1e-3)
   dl <- probotDataLoader(inp, tgt, batch = 16, device = "cpu")
 
-  metrics <- probotSingleEpochMDN(mdl, dl, opt, K)
+  metrics <- probotSingleEpochMDN(mdl, dl, opt)
   expect_true("loss" %in% names(metrics))
   expect_true("mae" %in% names(metrics))
   expect_true("rmse" %in% names(metrics))
@@ -36,7 +36,7 @@ test_that("probotSingleEpochMDN with lambda > 0 works", {
   opt <- optim_adam(mdl$parameters, lr = 1e-3)
   dl <- probotDataLoader(inp, tgt, batch = 16, device = "cpu")
 
-  metrics <- probotSingleEpochMDN(mdl, dl, opt, K, lambda = 0.5)
+  metrics <- probotSingleEpochMDN(mdl, dl, opt, lambda = 0.5)
   expect_true(is.finite(metrics$loss))
 })
 
@@ -53,10 +53,10 @@ test_that("probotSingleEpochMDN MAE/RMSE are element-wise, not row-wise", {
   opt <- optim_adam(mdl$parameters, lr = 0)
   dl <- probotDataLoader(inp, tgt, batch = 16, device = "cpu")
 
-  metrics <- probotSingleEpochMDN(mdl, dl, opt, K)
+  metrics <- probotSingleEpochMDN(mdl, dl, opt)
 
   raw <- mdl(torch_tensor(inp, dtype = torch_float()))
-  p <- ProBot:::.probotUnpackMDN(raw, K)
+  p <- ProBot:::.probotUnpackMDN(raw, mdl)
   weights <- as.array(nnf_softmax(p$logits, dim = 2))
   mu <- as.array(p$mu)
   mu_mix <- matrix(0, n, output_dim)
@@ -79,8 +79,7 @@ test_that("probotTrainMDN completes and returns model and history", {
   opt <- optim_adam(mdl$parameters, lr = 1e-3)
   dl <- probotDataLoader(inp, tgt, batch = 16, device = "cpu")
 
-  res <- probotTrainMDN(mdl, dl, opt, epochs = 3, mdn_components = K,
-                         verbose = FALSE, early_stop = FALSE)
+  res <- probotTrainMDN(mdl, dl, opt, epochs = 3, verbose = FALSE, early_stop = FALSE)
   expect_true(!is.null(res$model))
   expect_true(!is.null(res$history))
   expect_true(is.data.frame(res$history))
@@ -422,4 +421,36 @@ test_that("point defaults to centre, keeping prior behaviour", {
   expect_equal(formals(probotSingleEpochFlow)$point, "centre")
   expect_equal(formals(probotTrainFlow)$point, "centre")
   expect_equal(formals(probotTrainFlow)$lambda, 0)
+})
+
+# ---- the removed mdn_components argument -------------------------------------
+
+test_that("MDN trainers take no mixture count", {
+  set.seed(42)
+  input_dim <- 3; output_dim <- 2; K <- 3; n <- 40
+  inp <- matrix(rnorm(n * input_dim), n, input_dim)
+  tgt <- matrix(rnorm(n * output_dim), n, output_dim)
+  mdl <- probotMakeMDN(input_dim, output_dim, K, hidden_dims = c(8, 8),
+                       device = "cpu")()
+  opt <- optim_adam(mdl$parameters, lr = 1e-3)
+  dl <- probotDataLoader(inp, tgt, batch = 16, device = "cpu")
+
+  m <- probotSingleEpochMDN(mdl, dl, opt)
+  expect_length(m$mix, K)
+  expect_true(is.finite(m$loss))
+
+  res <- probotTrainMDN(mdl, dl, opt, epochs = 2, verbose = FALSE,
+                        early_stop = FALSE)
+  expect_true(!is.null(res$model))
+  expect_equal(nrow(res$history), 2L)
+
+  # mdn_components sat immediately before loss_fn, so a legacy positional count
+  # binds there; the error must name the cause rather than "non-function".
+  expect_error(probotSingleEpochMDN(mdl, dl, opt, K), "loss_fn")
+  expect_error(probotTrainMDN(mdl, dl, opt, 2, K), "loss_fn")
+  # A positional epochs value still works, and the retired name is rejected.
+  expect_equal(nrow(probotTrainMDN(mdl, dl, opt, 2, verbose = FALSE,
+                                  early_stop = FALSE)$history), 2L)
+  expect_error(probotTrainMDN(mdl, dl, opt, mdn_components = K),
+               "unused argument")
 })

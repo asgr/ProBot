@@ -348,7 +348,7 @@ you actually run.
 ### Scoring the two architectures
 
 `probotPIT()`, `probotTARP()` and `probotCRPS()` take a flow model in place of an
-MDN — same call, no `mdn_components` — and batch the inverse pass internally, so
+MDN — the same call either way — and batch the inverse pass internally, so
 this is cheap relative to training. Each new observation draws its own truth here,
 which is what a held-out calibration check requires.
 

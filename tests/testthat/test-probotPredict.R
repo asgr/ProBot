@@ -17,7 +17,7 @@ setup_mdn <- function() {
 
 test_that("probotPredictMDN returns a list with mu, log10_sigma, logits", {
   s <- setup_mdn()
-  out <- probotPredictMDN(s$inp, s$mdl, s$K)
+  out <- probotPredictMDN(s$inp, s$mdl)
 
   expect_true("mu" %in% names(out))
   expect_true("log10_sigma" %in% names(out))
@@ -26,7 +26,7 @@ test_that("probotPredictMDN returns a list with mu, log10_sigma, logits", {
 
 test_that("probotPredictMDN output shapes are correct", {
   s <- setup_mdn()
-  out <- probotPredictMDN(s$inp, s$mdl, s$K)
+  out <- probotPredictMDN(s$inp, s$mdl)
 
   n <- nrow(s$inp)
   expect_equal(dim(out$mu), c(n, s$K, s$output_dim))
@@ -36,7 +36,7 @@ test_that("probotPredictMDN output shapes are correct", {
 
 test_that("probotPredictMDN auto-detects device from model", {
   s <- setup_mdn()
-  out <- probotPredictMDN(s$inp, s$mdl, s$K, device = NULL)
+  out <- probotPredictMDN(s$inp, s$mdl, device = NULL)
   expect_true("mu" %in% names(out))
 })
 
@@ -46,7 +46,7 @@ test_that("probotSamplePostMDN returns correct dimensions", {
   col_sds <- apply(matrix(rnorm(100, 1, 0.5), 100, s$output_dim), 2, sd)
 
   n_samples <- 200
-  samples <- probotSamplePostMDN(s$inp[1, ], s$mdl, s$K, n_samples = n_samples,
+  samples <- probotSamplePostMDN(s$inp[1, ], s$mdl, n_samples = n_samples,
                                   col_means = col_means, col_sds = col_sds)
 
   expect_equal(dim(samples), c(n_samples, s$output_dim))
@@ -58,7 +58,7 @@ test_that("probotSamplePostMDN sets column names", {
   col_sds <- rep(1, s$output_dim)
   names <- c("a", "b")
 
-  samples <- probotSamplePostMDN(s$inp[1, ], s$mdl, s$K, n_samples = 100,
+  samples <- probotSamplePostMDN(s$inp[1, ], s$mdl, n_samples = 100,
                                   col_means = col_means, col_sds = col_sds,
                                   col_names = names)
   expect_equal(colnames(samples), names)
@@ -70,10 +70,10 @@ test_that("probotSamplePostMDN accepts a vector or a 1-row matrix identically", 
   col_sds <- rep(1, s$output_dim)
 
   set.seed(11)
-  v <- probotSamplePostMDN(s$inp[2, ], s$mdl, s$K, n_samples = 300,
+  v <- probotSamplePostMDN(s$inp[2, ], s$mdl, n_samples = 300,
                            col_means = col_means, col_sds = col_sds)
   set.seed(11)
-  m <- probotSamplePostMDN(matrix(s$inp[2, ], nrow = 1), s$mdl, s$K,
+  m <- probotSamplePostMDN(matrix(s$inp[2, ], nrow = 1), s$mdl,
                            n_samples = 300,
                            col_means = col_means, col_sds = col_sds)
 
@@ -87,7 +87,7 @@ test_that("probotSamplePostMDN keeps (n_samples x D) shape when D == 1", {
   mdl <- probotMakeMDN(3, 1, 2, hidden_dims = c(8, 8), device = "cpu")()
   x <- matrix(rnorm(15), 5, 3)
 
-  s <- probotSamplePostMDN(x[1, ], mdl, 2, n_samples = 100, col_names = "theta")
+  s <- probotSamplePostMDN(x[1, ], mdl, n_samples = 100, col_names = "theta")
   expect_true(is.matrix(s))
   expect_equal(dim(s), c(100L, 1L))
   expect_equal(colnames(s), "theta")
@@ -96,7 +96,7 @@ test_that("probotSamplePostMDN keeps (n_samples x D) shape when D == 1", {
 test_that("probotSamplePostMDN returns an (n_samples x D x N) array for many rows", {
   s <- setup_mdn()
   n_samples <- 100
-  arr <- probotSamplePostMDN(s$inp, s$mdl, s$K, n_samples = n_samples,
+  arr <- probotSamplePostMDN(s$inp, s$mdl, n_samples = n_samples,
                              col_names = c("a", "b"))
 
   expect_equal(dim(arr), c(n_samples, s$output_dim, nrow(s$inp)))
@@ -114,10 +114,10 @@ test_that("probotSamplePostMDN chunking does not alter draws", {
   col_sds <- rep(1, s$output_dim)
 
   set.seed(23)
-  one <- probotSamplePostMDN(s$inp[1, ], s$mdl, s$K, n_samples = 100,
+  one <- probotSamplePostMDN(s$inp[1, ], s$mdl, n_samples = 100,
                              col_means = col_means, col_sds = col_sds)
   set.seed(23)
-  bulk <- probotSamplePostMDN(s$inp, s$mdl, s$K, n_samples = 100,
+  bulk <- probotSamplePostMDN(s$inp, s$mdl, n_samples = 100,
                               col_means = col_means, col_sds = col_sds,
                               batch_size = 1)
 
@@ -135,7 +135,7 @@ test_that("probotSamplePostMDN is insensitive to chunk size in distribution", {
   col_sds <- rep(1, s$output_dim)
   n_samples <- 4000
 
-  pred <- probotPredictMDN(s$inp, s$mdl, s$K, device = "cpu")
+  pred <- probotPredictMDN(s$inp, s$mdl, device = "cpu")
   marg <- probotMarginalPostMDN(pred, col_means = col_means, col_sds = col_sds)
 
   # Analytic bounds on Monte Carlo error, with headroom for the max over
@@ -144,7 +144,7 @@ test_that("probotSamplePostMDN is insensitive to chunk size in distribution", {
   tol_s <- 6 * marg$post_sd / sqrt(2 * n_samples)
 
   for (bs in c(1L, 10L)) {
-    arr <- probotSamplePostMDN(s$inp, s$mdl, s$K, n_samples = n_samples,
+    arr <- probotSamplePostMDN(s$inp, s$mdl, n_samples = n_samples,
                                col_means = col_means, col_sds = col_sds,
                                batch_size = bs)
     expect_equal(dim(arr), c(n_samples, s$output_dim, nrow(s$inp)))
@@ -162,9 +162,9 @@ test_that("probotSamplePostMDN matches the analytic marginal moments", {
   col_means <- c(5, -2)
   col_sds <- c(2, 0.5)
 
-  pred <- probotPredictMDN(s$inp[1, , drop = FALSE], s$mdl, s$K, device = "cpu")
+  pred <- probotPredictMDN(s$inp[1, , drop = FALSE], s$mdl, device = "cpu")
   marg <- probotMarginalPostMDN(pred, col_means = col_means, col_sds = col_sds)
-  draws <- probotSamplePostMDN(s$inp[1, ], s$mdl, s$K, n_samples = 1e5,
+  draws <- probotSamplePostMDN(s$inp[1, ], s$mdl, n_samples = 1e5,
                                col_means = col_means, col_sds = col_sds)
 
   # Monte Carlo SE on the mean is ~ sd/sqrt(n) <= 0.011 here.
@@ -190,7 +190,7 @@ test_that("probotSamplePostMDN soft-clamps log10_sigma to [-5, 5]", {
   x <- matrix(0, 1, 1)
 
   n_samples <- 1e5
-  samples <- probotSamplePostMDN(x, mdl, mdn_components = 1,
+  samples <- probotSamplePostMDN(x, mdl,
                                  n_samples = n_samples,
                                  col_means = 0, col_sds = 1)
   # The clamp is what this test is for: capped sigma = 1e5, not 1e8.
@@ -203,7 +203,7 @@ test_that("probotSamplePostMDN soft-clamps log10_sigma to [-5, 5]", {
 
 test_that("probotMarginalPostMDN returns list with post_mean and post_sd", {
   s <- setup_mdn()
-  out <- probotPredictMDN(s$inp, s$mdl, s$K)
+  out <- probotPredictMDN(s$inp, s$mdl)
   col_means <- rep(0, s$output_dim)
   col_sds <- rep(1, s$output_dim)
 
@@ -214,7 +214,7 @@ test_that("probotMarginalPostMDN returns list with post_mean and post_sd", {
 
 test_that("probotMarginalPostMDN output dimensions are correct", {
   s <- setup_mdn()
-  out <- probotPredictMDN(s$inp, s$mdl, s$K)
+  out <- probotPredictMDN(s$inp, s$mdl)
   col_means <- rep(0, s$output_dim)
   col_sds <- rep(1, s$output_dim)
 
@@ -226,7 +226,7 @@ test_that("probotMarginalPostMDN output dimensions are correct", {
 
 test_that("probotMarginalPostMDN sets column names", {
   s <- setup_mdn()
-  out <- probotPredictMDN(s$inp, s$mdl, s$K)
+  out <- probotPredictMDN(s$inp, s$mdl)
   col_means <- rep(0, s$output_dim)
   col_sds <- rep(1, s$output_dim)
   names <- c("x1", "x2")
@@ -291,4 +291,31 @@ test_that("probotPredictPointScaled returns un-scaled predictions", {
   pred <- probotPredictPointScaled(s$inp, s$mdl, col_means, col_sds)
   expect_true(is.matrix(pred))
   expect_equal(dim(pred), c(nrow(s$inp), s$output_dim))
+})
+
+# ---- the removed mdn_components argument -------------------------------------
+
+test_that("probotSamplePostMDN refuses a legacy positional mixture count", {
+  # mdn_components was the third formal; n_samples is now third, so
+  # probotSamplePostMDN(x, model, 5) would quietly return five draws.
+  s <- setup_mdn()
+  expect_error(probotSamplePostMDN(s$inp[1, ], s$mdl, s$K, n_samples = 50),
+               "positionally")
+  expect_error(probotSamplePostMDN(s$inp[1, ], s$mdl, mdn_components = s$K),
+               "unused argument")
+  # Two positional arguments stay legal, and so does anything named.
+  set.seed(1)
+  expect_equal(dim(probotSamplePostMDN(s$inp[1, ], s$mdl, n_samples = 40)),
+               c(40L, s$output_dim))
+})
+
+test_that("probotPredictMDN refuses a legacy positional mixture count", {
+  s <- setup_mdn()
+  # The count now lands on `device`, which would fail inside torch_device().
+  expect_error(probotPredictMDN(s$inp, s$mdl, s$K), "positionally")
+  out <- probotPredictMDN(s$inp, s$mdl)
+  expect_equal(as.integer(dim(out$mu)), c(nrow(s$inp), s$K, s$output_dim))
+  # do.call() with a named list is unaffected by the positional guard.
+  dc <- do.call(probotPredictMDN, list(input = s$inp, model = s$mdl))
+  expect_equal(as.integer(dim(dc$mu)), as.integer(dim(out$mu)))
 })

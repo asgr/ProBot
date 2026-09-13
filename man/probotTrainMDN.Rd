@@ -7,10 +7,10 @@ Run one optimization epoch for an MDN or iterate multiple epochs with optional
 early stopping and checkpoint saving.
 }
 \usage{
-probotSingleEpochMDN(model, dataloader, optimizer, mdn_components,
+probotSingleEpochMDN(model, dataloader, optimizer,
   loss_fn = probotLossMDN, lambda = 0)
 
-probotTrainMDN(model, dataloader, optimizer, epochs = 100, mdn_components,
+probotTrainMDN(model, dataloader, optimizer, epochs = 100,
   loss_fn = probotLossMDN, lambda = 0, checkpoint_dir = NULL,
   checkpoint_every = 10, history = NULL, verbose = TRUE, early_stop = TRUE,
   stop_window = 20, stop_delta = 1e-2)
@@ -21,8 +21,6 @@ probotTrainMDN(model, dataloader, optimizer, epochs = 100, mdn_components,
   \item{dataloader}{Torch data loader yielding \code{$x} and \code{$y} batches.}
 
   \item{optimizer}{Torch optimizer configured with model parameters.}
-
-  \item{mdn_components}{Number of Gaussian mixture components in the model.}
 
   \item{loss_fn}{Loss function to use for optimisation.}
   
@@ -81,8 +79,7 @@ if (requireNamespace("torch", quietly = TRUE)) {
   metrics <- probotSingleEpochMDN(
     model = model,
     dataloader = loader,
-    optimizer = opt,
-    mdn_components = 2
+    optimizer = opt
   )
 
   metrics$loss
