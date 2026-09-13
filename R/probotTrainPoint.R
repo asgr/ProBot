@@ -49,7 +49,20 @@ probotTrainPoint <- function(model,
                               verbose = TRUE,
                               early_stop = TRUE,
                               stop_window = 20,
-                              stop_delta = 1e-2) {
+                              stop_delta = 1e-2,
+                              holdout_fraction = 0.1,
+                              val_dataloader = NULL,
+                              val_batch = NULL,
+                              split_seed = NULL,
+                              holdout_stop = TRUE,
+                              holdout_min_delta = 1e-3,
+                              holdout_patience = 5L) {
+  val <- .probotValSetup(dataloader,
+                         holdout_fraction = holdout_fraction,
+                         val_dataloader = val_dataloader,
+                         val_batch = val_batch,
+                         split_seed = split_seed)
+
   res <- .probotTrainLoop(
     train_fn = probotSingleEpochPoint,
     model = model,
@@ -64,8 +77,13 @@ probotTrainPoint <- function(model,
     stop_window = stop_window,
     stop_delta = stop_delta,
     checkpoint_prefix = "point",
-    loss_fn = loss_fn
+    loss_fn = loss_fn,
+    val = val,
+    score_fn = if (is.null(val)) NULL else
+      .probotValScorer("point", loss_fn),
+    holdout_stop = holdout_stop,
+    holdout_min_delta = holdout_min_delta,
+    holdout_patience = holdout_patience
   )
-  # Ensure mae/rmse columns are present in history
   res
 }

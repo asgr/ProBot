@@ -207,9 +207,22 @@ probotTrainFlow <- function(model,
                                   verbose = TRUE,
                                   early_stop = TRUE,
                                   stop_window = 20,
-                                  stop_delta = 1e-2) {
+                                  stop_delta = 1e-2,
+                                  holdout_fraction = 0.1,
+                                  val_dataloader = NULL,
+                                  val_batch = NULL,
+                                  split_seed = NULL,
+                                  holdout_stop = TRUE,
+                                  holdout_min_delta = 1e-3,
+                                  holdout_patience = 5L) {
   # Resolve here too so a typo fails immediately rather than inside the loop.
   point <- match.arg(point, choices = c("centre", "mean", "loc"))
+
+  val <- .probotValSetup(dataloader,
+                         holdout_fraction = holdout_fraction,
+                         val_dataloader = val_dataloader,
+                         val_batch = val_batch,
+                         split_seed = split_seed)
 
   .probotTrainLoop(
     train_fn = probotSingleEpochFlow,
@@ -228,6 +241,13 @@ probotTrainFlow <- function(model,
     loss_fn = loss_fn,
     lambda = lambda,
     point = point,
-    n_point_samples = n_point_samples
+    n_point_samples = n_point_samples,
+    val = val,
+    score_fn = if (is.null(val)) NULL else
+      .probotValScorer("flow", loss_fn, lambda = lambda, point = point,
+                       n_point_samples = n_point_samples),
+    holdout_stop = holdout_stop,
+    holdout_min_delta = holdout_min_delta,
+    holdout_patience = holdout_patience
   )
 }

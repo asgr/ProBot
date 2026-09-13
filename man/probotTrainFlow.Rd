@@ -14,7 +14,9 @@ probotTrainFlow(model, dataloader, optimizer, epochs = 100,
   loss_fn = probotLossNF, lambda = 0, point = "centre",
   n_point_samples = 32, checkpoint_dir = NULL, checkpoint_every = 10,
   history = NULL, verbose = TRUE, early_stop = TRUE, stop_window = 20,
-  stop_delta = 1e-2)
+  stop_delta = 1e-2, holdout_fraction = 0.1, val_dataloader = NULL,
+  val_batch = NULL, split_seed = NULL, holdout_stop = TRUE,
+  holdout_min_delta = 1e-3, holdout_patience = 5L)
 }
 \arguments{
   \item{model}{Instantiated torch module returned by \code{probotMakeFlow(... )()}.}
@@ -58,11 +60,50 @@ probotTrainFlow(model, dataloader, optimizer, epochs = 100,
   \item{stop_window}{Window size (in epochs) for early stopping comparison.}
 
   \item{stop_delta}{Minimum required improvement in rolling mean loss.}
+
+  \item{holdout_fraction}{Fraction of the dataloader's rows held out for
+    verification, scored once per epoch and reported beside the training loss.
+    Defaults to 0.1. Set to 0 to train on every row and record no verification
+    loss. Ignored when \code{val_dataloader} is supplied. Datasets with fewer
+    than 10 rows warn and skip the split.}
+
+  \item{val_dataloader}{Optional \code{\link{probotDataLoader}} used as the
+    verification set verbatim, in place of a random split.}
+
+  \item{val_batch}{Rows per verification batch. Defaults to the whole
+    verification set at once; affects only speed and memory.}
+
+  \item{split_seed}{Seed for the holdout draw. \code{NULL} (default) uses the
+    current state of R's global RNG.}
+
+  \item{holdout_stop}{If TRUE (default) and a verification set exists, stop when
+    the training loss is still improving while the verification loss is not.}
+
+  \item{holdout_min_delta}{A verification-loss trend more positive than
+    \code{-holdout_min_delta} per epoch counts as "not improving".}
+
+  \item{holdout_patience}{Consecutive epochs the over-training condition must
+    hold before stopping.}
 }
 \details{
 The data loader should provide observed summaries or features as inputs and the
 corresponding parameters as targets. Early stopping compares mean loss over the
 latest \code{stop_window} epochs to the previous window.
+
+By default 10 percent of the loader's rows are held out before epoch 1 and
+scored every epoch under the same \code{loss_fn} and \code{lambda} blend as
+training, giving a \code{val_loss} column beside \code{loss}. For a flow the
+verification pass runs \code{model$forward()} only, which is the cheap direction
+of the change of variables, so the overhead is roughly one extra forward pass
+over a tenth of the data per epoch. See \code{\link{probotTrainPoint}} for the
+split, the two stopping rules and the reproducibility caveats.
+
+One caveat specific to flows: with \code{lambda > 0} and \code{point = "mean"},
+the verification \code{val_mae}/\code{val_rmse} are Monte-Carlo estimates whose
+noise grows as the verification set shrinks, and they are redrawn every epoch
+(torch's RNG, not R's). \code{val_loss} itself is unaffected. Use
+\code{point = "centre"} or \code{"loc"} when you need the verification error
+columns to be directly comparable across epochs.
 
 Gradients are clipped to \code{[-1, 1]} in value (via
 \code{\link[torch]{nn_utils_clip_grad_value_}}) before each optimizer step.
@@ -152,7 +193,18 @@ likelihood.
   \item \code{probotTrainFlow()}: List with trained \code{model} and
   \code{history} data frame. The history data frame contains columns
   \code{epoch} and \code{loss}, plus \code{mae} and \code{rmse} when
-  \code{lambda > 0}.
+  \code{lambda > 0}. With a verification set it also carries \code{val_loss}
+  (plus \code{val_mae} and \code{val_rmse} when \code{lambda > 0}), and the
+  result gains a \code{validation} component reporting \code{n_train},
+  \code{n_verify}, \code{verify_idx}, \code{source}, \code{holdout_fraction},
+  \code{best_epoch}, \code{best_val_loss}, \code{final_val_loss} and
+  \code{stop_reason}.
+
+  A flow's negative log-likelihood is unbounded above, so a single
+  out-of-support verification row can move \code{val_loss} by more than a
+  genuine change in the density. When that is suspected, score the same rows
+  row-by-row with \code{probotLossEval(input, output, model,
+  idx = validation$verify_idx, per_row = TRUE)}.
 }
 }
 \author{

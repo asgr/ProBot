@@ -216,12 +216,15 @@ test_that("training a headed flow keeps both lambda arms working", {
     expect_equal("rmse" %in% names(res$history), lam > 0)
   }
 
-  # lambda = 0 keeps the historical (epoch, loss) schema.
+  # lambda = 0 keeps the historical (epoch, loss) schema. holdout_fraction = 0
+  # is needed only because the split adds a val_loss column, which is a
+  # different feature; the claim under test is that no mae/rmse appear.
   mdl <- .make_loc("nsf")
   res <- probotTrainFlow(mdl, probotDataLoader(x, th, batch = 48, shuffle = FALSE,
                                                device = "cpu"),
                          optim_adam(mdl$parameters, lr = 1e-3), epochs = 2,
-                         verbose = FALSE, early_stop = FALSE)
+                         verbose = FALSE, early_stop = FALSE,
+                         holdout_fraction = 0)
   expect_equal(names(res$history), c("epoch", "loss"))
 })
 
