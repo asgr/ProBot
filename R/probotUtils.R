@@ -129,7 +129,13 @@
   batch <- dataloader$batch_size
   if (is.null(batch)) batch <- 1L
   shuffled <- inherits(dataloader$sampler, "utils_sampler_random")
-  if (is.null(val_batch)) val_batch <- n_val
+  # Cap the verify batch rather than scoring the whole holdout in one pass.
+  # A single giant batch is the one place verification differs from training
+  # (which only ever sees `batch` rows), and any loss function that builds a
+  # batch x batch intermediate becomes quadratic in memory there -- probotLossNF()
+  # did exactly that. 4096 matches probotLossEval()'s default batch so the two
+  # independent scoring paths stay comparable; pass val_batch to override.
+  if (is.null(val_batch)) val_batch <- min(n_val, 4096L)
 
   list(
     train = dataloader(do.call(tensor_dataset, train_tensors),

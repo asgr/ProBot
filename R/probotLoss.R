@@ -38,18 +38,32 @@ probotLossNF <- function(output_true, output_pred, model) {
   # output_pred: (Batch, C) - The observed data / conditioning variables
 
   out <- model$forward(output_true, output_pred)
-  z <- out$z
-  log_det_jac <- out$log_det_jac
-  
-  # Base distribution: Standard Normal N(0, I)
-  # log p_base(z) = -0.5 * sum(z^2 + log(2*pi)) across dimensions
-  log_p_z <- -0.5 * (z^2 + log(2 * pi))$sum(dim = 2)$unsqueeze(1)
-  
-  # Total log likelihood: log p(true_theta | x) = log p_base(z) + log|det(J)|
-  log_likelihood <- log_p_z + log_det_jac
-  
+  log_likelihood <- .probotNFLogLik(out)
+
   # Return Negative Log Likelihood (to be minimized by optimizer)
   -log_likelihood$mean()
+}
+
+# Per-row log p(theta | x) = log p_base(z) + log|det dz/dtheta|, as (N, 1).
+#
+# Split out of probotLossNF() so the (N, 1) shape is an assertable invariant:
+# the bug this guards against was invisible in the *value* at ordinary batch
+# sizes, because mean() over an (N, N) broadcast equals the row mean exactly in
+# real arithmetic. It is only shape and memory cost that differ -- and at large
+# N that cost is what breaks it.
+.probotNFLogLik <- function(out) {
+  z <- out$z
+  log_det_jac <- out$log_det_jac
+  # Base distribution: Standard Normal N(0, I)
+  # log p_base(z) = -0.5 * sum(z^2 + log(2*pi)) across dimensions
+  #
+  # keepdim is load-bearing. Without it the sum collapses to a length-N *vector*,
+  # and an unsqueeze on one side alone is what decides the shape: making it (1, N)
+  # and adding the model's (N, 1) log|det J| broadcasts to an (N, N) matrix whose
+  # element [i, j] pairs row i's Jacobian with row j's base density.
+  log_p_z <- -0.5 * (z^2 + log(2 * pi))$sum(dim = 2, keepdim = TRUE)
+  # Both terms are (N, 1), so this stays (N, 1) and mean() is a plain row average.
+  log_p_z + log_det_jac
 }
 
 probotLossMSE <- function(

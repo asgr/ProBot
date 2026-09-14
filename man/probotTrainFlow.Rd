@@ -70,8 +70,13 @@ probotTrainFlow(model, dataloader, optimizer, epochs = 100,
   \item{val_dataloader}{Optional \code{\link{probotDataLoader}} used as the
     verification set verbatim, in place of a random split.}
 
-  \item{val_batch}{Rows per verification batch. Defaults to the whole
-    verification set at once; affects only speed and memory.}
+  \item{val_batch}{Rows per verification batch. Defaults to the smaller of
+    the verification set and 4096 rows, matching \code{probotLossEval()}'s
+    default batch. The verification loss is averaged row-weighted, so for a
+    well-behaved loss any \code{val_batch} gives the same number; the cap is
+    there because a single pass over a large holdout is not free --- a loss
+    function that builds a batch-by-batch intermediate makes it quadratic in
+    \code{val_batch}.}
 
   \item{split_seed}{Seed for the holdout draw. \code{NULL} (default) uses the
     current state of R's global RNG.}

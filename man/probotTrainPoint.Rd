@@ -67,9 +67,12 @@ probotTrainPoint(
     training data; nothing is checked, since an explicit loader is a deliberate
     choice.}
 
-  \item{val_batch}{Rows per verification batch. Defaults to the whole
-    verification set in one batch. Affects speed and memory only: the
-    verification loss is averaged row-weighted, so it is identical for any
+  \item{val_batch}{Rows per verification batch. Defaults to the smaller of
+    the verification set and 4096 rows, matching \code{probotLossEval()}'s
+    default batch. The verification loss is averaged row-weighted, so for a
+    well-behaved loss any \code{val_batch} gives the same number; the cap is
+    there because a single pass over a large holdout is not free --- a loss
+    function that builds a batch-by-batch intermediate makes it quadratic in
     \code{val_batch}.}
 
   \item{split_seed}{Seed for the holdout draw. \code{NULL} (default) uses the

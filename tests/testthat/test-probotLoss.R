@@ -102,6 +102,51 @@ test_that("probotLossNF returns a scalar tensor", {
   expect_true(is.finite(as.numeric(loss)))
 })
 
+test_that("probotLossNF pairs each row's density term with its own Jacobian", {
+  # The per-row log-likelihood must be an (N, 1) column. It used to be built as
+  # a (1, N) base term plus the model's (N, 1) log|det J|, which broadcasts to
+  # (N, N): element [i, j] pairs row i's Jacobian with row j's base density.
+  # mean() over that matrix equals the correct row mean in real arithmetic, so
+  # the *scalar loss* was identical and no value test can catch this -- only the
+  # shape can. The shape is also the whole problem: (N, N) is 8.1e9 float32
+  # elements at N = 90000, which is where a holdout scored in one batch started
+  # reporting +223 for a model whose true verify NLL was -13.5.
+  n <- 50L; d <- 4L
+  # Deterministic z and log|det J|: distinct per row, no RNG to drift.
+  zv <- seq_len(n * d) / 37 - 1.5
+  zm <- matrix(zv, nrow = n)
+  out <- list(
+    z = torch_tensor(zm, dtype = torch_float()),
+    log_det_jac = (torch_arange(1, n, dtype = torch_float()) * 3)$unsqueeze(2)
+  )
+  ll <- ProBot:::.probotNFLogLik(out)
+  expect_identical(as.integer(ll$shape), c(n, 1L))
+  expect_identical(as.integer(ll$numel()), n)
+
+  z2row <- rowSums(zm^2)
+  ldv <- as.numeric(seq_len(n) * 3)
+  # Row i is row i's own log p: lpz_i + ld_i, both from the same row.
+  expect_equal(as.numeric(as.array(ll)),
+               -0.5 * (z2row + d * log(2 * pi)) + ldv, tolerance = 1e-5)
+
+  # Negative control for the failure mode. The old (N, N) matrix had element
+  # [i, j] = lpz_j + ld_i, so its mean was mean(lpz) + mean(ld) -- the same
+  # number as the correct row mean, which is why no value test caught this. Only
+  # the per-row values differ, and only the broadcast version is constant.
+  cross <- mean(-0.5 * (z2row + d * log(2 * pi))) + mean(ldv)
+  expect_equal(mean(as.numeric(as.array(ll))), cross, tolerance = 1e-5)
+  expect_false(isTRUE(all.equal(as.numeric(as.array(ll)), rep(cross, n),
+                                tolerance = 1e-2)))
+
+  # And the scalar the trainer reports really is -mean(ll).
+  stub <- torch::nn_module("nf_stub",
+    initialize = function(o) { self$o <- o },
+    forward = function(theta, x) self$o)
+  mdl <- stub(out)
+  expect_equal(as.numeric(probotLossNF(torch_randn(n, d), torch_randn(n, 2), mdl)),
+               -cross, tolerance = 1e-5)
+})
+
 test_that("MSE loss is zero when predictions match truth", {
   # Zero-weighted head => every mu is 0, so the mixture mean is exactly 0.
   mdl <- make_mdn_model(output_dim = 2, mdn_components = 2)
