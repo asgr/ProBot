@@ -14,10 +14,11 @@ probotSamplePostNF(
   col_means = NULL,
   col_sds = NULL,
   col_names = NULL,
-  dim_theta = NULL,
+  output_dim = NULL,
   device = NULL,
   batch_size = NULL,
-  verbose = FALSE
+  verbose = FALSE,
+  point_estimate = FALSE
 )
 }
 \arguments{
@@ -38,21 +39,38 @@ probotSamplePostNF(
 
    \item{col_names}{Character vector of column names to assign to the output matrix.}
 
-   \item{dim_theta}{Integer specifying the parameter dimensionality. Only needed when
+   \item{output_dim}{Integer specifying the output parameter dimensionality. Only needed when
    \code{col_means} is \code{NULL} (i.e., when no scaling is applied). If both
-   \code{dim_theta} and \code{col_means} are \code{NULL}, the function throws an error.}
+   \code{output_dim} and \code{col_means} are \code{NULL}, the function throws an error.}
 
    \item{device}{Torch device string (e.g., "cpu", "mps"). Defaults to \code{NULL},
    which auto-detects from the model's parameters.}
 
    \item{batch_size}{Number of observations processed per chunk in multi-observation
-   mode. If \code{NULL} (default), it is chosen automatically so that roughly
-   \code{2e6} rows (\code{batch_size * n_samples}) of latent space are held in
-   memory at once. Lower this on machines with less RAM, or raise it if more
-   headroom is available. Ignored in single-observation mode.}
+   mode. If \code{NULL} (default), it is chosen automatically from a memory
+   budget: the inverse pass holds \code{batch_size * n_samples} rows, and each
+   row additionally materialises one \code{hidden_dim}-wide activation per flow
+   layer, so the automatic size is the smaller of \code{2e6 / n_samples} draw
+   rows and the number of rows whose conditioner activations fit in memory (see
+   \strong{Memory} below). An explicit \code{batch_size} is honoured unless it
+   would exceed that budget, in which case it is reduced to the safe value with
+   a warning. Because the posterior draws come from one random sweep per chunk,
+   the chunk size affects the random stream: lowering \code{batch_size} below
+   the budget does not merely slow sampling down, it changes the samples. In
+   single-observation mode \code{n_samples} is the chunk axis, so the budget
+   applies to \code{n_samples} directly and this argument is ignored.}
 
    \item{verbose}{Logical; if \code{TRUE} and processing in multiple chunks,
    print a progress message at regular intervals.}
+
+   \item{point_estimate}{Logical. If \code{TRUE}, return one deterministic
+   point estimate per row of \code{input} instead of drawing samples: the
+   location head \eqn{\mu(x)} for a \code{\link{probotFlowLoc}} model, or the
+   inverse of \code{z = 0} (the base distribution's mode) for a plain flow. One
+   sweep over \code{input}, no \code{n_samples} cost, and the result scales with
+   the number of rows rather than \code{rows * n_samples}. \code{col_means} /
+   \code{col_sds} unscale it as usual; \code{n_samples} and \code{batch_size} are
+   ignored, and \code{verbose} warns if it was set. Defaults to \code{FALSE}.}
 }
 \details{
 The model is set to evaluation mode (\code{model$eval()}) and all
@@ -73,6 +91,20 @@ In multi-observation mode, observations are processed in chunks of
 (millions of observations) can be handled without exhausting memory. Only the
 accumulated output array and one chunk of intermediate tensors are held at a
 time.
+
+\strong{Memory.} The dominant allocation during sampling is not the
+\code{(n_samples x D)} output but the conditioner activations inside the
+inverse pass, which are \code{(batch_size * n_samples) x hidden_dim}
+floats wide for every flow layer. A \code{hidden_dim = 512} NSF therefore
+needs roughly \code{160} times more memory per row than its \code{D = 9} output
+suggests, and the automatic chunk size is set from the model's widest internal
+layer (found by \code{.probotFlowActWidth()}) rather than from \code{D} alone.
+This is why the budget is per-model: a default-width (\code{hidden_dim = 32})
+RealNVP is unaffected, while a wide flow or a \code{\link{probotFlowLoc}} model
+with a broad head gets a smaller chunk. MPS is given a larger budget than CPU
+because it keeps activations on-device. Chunking more finely costs nothing
+statistically but does change the random stream, so results are reproducible
+only at a fixed \code{batch_size} (or a fixed automatic one).
 }
 \value{
 If \option{input} is a vector, returns a numeric matrix of shape \eqn{n\_samples \times D}, where \eqn{D} is the number
@@ -83,13 +115,19 @@ If \option{input} is a matrix, returns a numeric array of shape
 parameters and \eqn{Nrow} is the number of rows in \option{input}. The
 \code{Sample}, \code{Parameter}, and \code{Observation} dimension names are
 set from \code{col_names} and the row/observation indices if provided.
+
+With \code{point_estimate = TRUE}, a matrix of shape \eqn{Nrow \times D} (or a
+length-\eqn{D} vector when \code{input} is a vector). The single-row and
+multi-row paths use different float32 GEMM kernels, so a one-row result matches
+the corresponding row of a larger batch only to about \eqn{10^{-6}} relative.
 }
 \author{
 Aaron Robotham
 }
 \seealso{
 \code{\link{probotMakeFlow}}, \code{\link{probotLossNF}},
-\code{\link{probotScaleBackward}}, \code{\link{probotSamplePostMDN}}
+\code{\link{probotScaleBackward}}, \code{\link{probotSamplePostMDN}},
+\code{\link{probotSigmaPostNF}} for a much cheaper (but first-order) alternative
 }
 \examples{
 \dontrun{

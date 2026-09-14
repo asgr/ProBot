@@ -6,14 +6,8 @@ Construct an \code{\link[torch]{nn_module}} implementing a Multi-Layer Perceptro
 The network maps input features to point predictions via a standard regression output layer.
 }
 \usage{
-probotMakePoint(
-  input_dim,
-  output_dim,
-  hidden_dims = c(128, 256, 256),
-  activation = nnf_relu,
-  dropout = 0,
-  device = NULL
-)
+probotMakePoint(input_dim, output_dim, hidden_dims = c(128, 256, 256),
+  activation = nnf_relu, dropout = 0, device = NULL)
 }
 \arguments{
     \item{input_dim}{Number of input features.}

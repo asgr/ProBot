@@ -1,77 +1,109 @@
 \name{probotAssess}
+\alias{probotAssess}
 \alias{probotCRPS}
 \alias{probotPIT}
 \alias{probotTARP}
 \title{Posterior Predictive Assessment: CRPS, PIT, and TARP}
 \description{
 Assess the calibration and sharpness of posterior samples drawn from a
-Mixture Density Network (MDN). \code{probotCRPS()} computes the Continuous
-Ranked Probability Score, \code{probotPIT()} computes Probability Integral
-Transform values, and \code{probotTARP()} computes Test of Accuracy with
+Mixture Density Network (MDN) or a normalising flow. \code{probotCRPS()} computes
+the Continuous Ranked Probability Score, \code{probotPIT()} computes Probability
+Integral Transform values, and \code{probotTARP()} computes Test of Accuracy with
 Random Points coverage values.
 }
 \usage{
 probotCRPS(
-  mdn_output,
+  input,
+  model,
   params,
   n_test = NULL,
   n_samples = 1e4,
-  col_means,
-  col_sds,
+  col_means = NULL,
+  col_sds = NULL,
   col_names = NULL,
+  batch_size = NULL,
   verbose = TRUE
 )
 
 probotPIT(
-  mdn_output,
+  input,
+  model,
   params,
   n_test = NULL,
   n_samples = 1e4,
-  col_means,
-  col_sds,
+  col_means = NULL,
+  col_sds = NULL,
   col_names = NULL,
+  batch_size = NULL,
   verbose = TRUE
 )
 
 probotTARP(
-  mdn_output,
+  input,
+  model,
   params,
   n_test = NULL,
   n_samples = 1e4,
-  col_means,
-  col_sds,
+  col_means = NULL,
+  col_sds = NULL,
   col_names = NULL,
+  batch_size = NULL,
   verbose = TRUE
 )
 }
 \arguments{
-  \item{mdn_output}{List returned by \code{\link{probotPredictMDN}()}, containing
-    \code{logits}, \code{mu}, and \code{log10_sigma} tensors.}
+  \item{input}{Numeric matrix of conditioning inputs, with one row per test
+    observation and the same columns used to train \code{model}. Rows beyond
+    \code{n_test} are ignored, so it is not necessary to subset beforehand.
+    A bare vector is treated as a single observation.}
+
+  \item{model}{An instantiated \code{\link[torch]{nn_module}} object: either an
+    MDN (from \code{\link{probotMakeMDN}}) or a normalising flow (from
+    \code{\link{probotMakeFlow}}, \code{\link{probotFlowRealNVP}},
+    \code{\link{probotFlowMAF}} or \code{\link{probotFlowNSF}}). The model class
+    decides which sampler is used, and an MDN supplies its own number of mixture
+    components, so nothing extra is needed to describe the posterior shape.}
 
   \item{params}{Numeric matrix of shape \eqn{n_\text{test} \times n_\text{params}}
-    containing the true parameter values for each test observation.}
+    containing the true parameter values for each test observation. The number of
+    columns must match the model's parameter dimension.}
 
-  \item{n_test}{Number of values to compute. For \code{probotCRPS()} and
-    \code{probotPIT()}, defaults to \code{NULL} (all rows). For
-    \code{probotTARP()}, defaults to \code{1e4}. In all cases, cannot exceed
-    \code{nrow(params)}.}
+  \item{n_test}{Number of values to compute (i.e. the first \code{n_test} rows
+    of \code{params}). Defaults to \code{NULL} (all \code{nrow(params)} rows)
+    for all three functions; otherwise capped at \code{nrow(params)}.}
 
   \item{n_samples}{Number of posterior samples to draw per observation.
     Defaults to \code{1e4}.}
 
-  \item{col_means}{Centering values used for back-transforming MDN output,
-    as returned by \code{\link{probotScaleForward}}.}
+  \item{col_means}{Optional centering values used for back-transforming model
+    output, as returned by \code{\link{probotScaleForward}}. If omitted, results
+    are computed on the model's (scaled) output scale; \code{params} must then
+    be on that same scale.}
 
-  \item{col_sds}{Scale values used for back-transforming MDN output,
-    as returned by \code{\link{probotScaleForward}}.}
+  \item{col_sds}{Optional scale values used for back-transforming model output,
+    as returned by \code{\link{probotScaleForward}}. Must be given together with
+    \code{col_means}.}
 
   \item{col_names}{Optional character vector of parameter names. For
     \code{probotCRPS} and \code{probotPIT}, assigned as column names
-    of the returned matrix. For \code{probotTARP()}, passed through to
-    \code{\link{probotSamplePostMDN}().}}
+    of the returned matrix; for \code{probotTARP} it is used only for the
+    internal sample array and the returned vector is unnamed.}
 
-  \item{verbose}{Logical. If \code{TRUE} (default), prints progress to the
-    console every 1000 observations.}
+  \item{batch_size}{Number of observations sampled per chunk, passed to the
+    underlying sampler. If \code{NULL} (default) the chunk size is
+    chosen automatically to bound memory. For flow models the automatic size
+    also accounts for the conditioner activations inside the inverse pass,
+    which are far wider than the \eqn{D}-column draw matrix (see
+    \code{\link{probotSamplePostNF}}); for MDN models only the draw array is
+    budgeted. An explicit \code{batch_size} is passed through to the sampler,
+    which clamps it with a warning if it is not memory-safe.}
+
+  \item{verbose}{Logical. If \code{TRUE} (default), print progress for each
+    chunk of observations scored, as
+    \code{probotPIT: chunk i/n (obs a-b of n_test)} (named for the calling
+    function). Progress is reported by the assessment function's own chunk
+    loop, not by the underlying sampler; at most about 20 lines are printed
+    however many chunks there are, plus the first and last.}
 }
 \details{
   \strong{CRPS:} For each test observation \eqn{i} and parameter dimension
@@ -111,6 +143,33 @@ probotTARP(
 
   Under a well-calibrated posterior, TARP values should be uniformly
   distributed on \eqn{[0, 1]}.
+
+  All three functions sample the first \code{n_test} rows of \code{input} with
+  the sampler that matches \code{model}:
+  \code{\link{probotSamplePostMDN}} for MDNs,
+  \code{\link{probotSamplePostNF}} for flows. Nothing else about the posterior
+  has to be declared: an MDN's head is read through \code{model}, whose stored
+  \code{mdn_components} and \code{output_dim} resolve the
+  \code{K * (2D + 1)} output width into \eqn{K} and \eqn{D} (the width alone is
+  ambiguous). \code{params} used to be the fourth formal, behind
+  \code{mdn_components}; a call that still passes a count by position puts it in
+  \code{params} and is rejected by name rather than silently misread.
+  Sampling proceeds in chunks of
+  \code{batch_size} observations, so only one
+  \eqn{n\_samples \times D \times \text{chunk}}{n_samples x D x chunk} array of
+  draws is held in memory at a time, and the statistics above are computed
+  vectorially over each chunk. Peak memory therefore tracks \code{batch_size}
+  rather than \code{n_test}; the returned matrix tracks only
+  \eqn{n_\text{test} \times D}. Lower \code{batch_size} if memory becomes restrictive,
+  at the cost of more (smaller) sampling passes.
+
+  For a flow the automatic chunk size is bounded by the sampler's own activation
+  budget as well as the draw array, because the inverse pass is wide in
+  \code{hidden_dim} rather than in \eqn{D}. An explicit \code{batch_size} that
+  exceeds that budget is reduced here, with a single warning, rather than once
+  per chunk. Either way, changing \code{batch_size} changes the random stream
+  the draws come from, so a scored result is reproducible only at a fixed chunk
+  size; scores that average over many draws are otherwise insensitive to it.
 }
 \value{
   \code{probotCRPS()} returns a numeric matrix of shape
@@ -129,24 +188,25 @@ probotTARP(
   Aaron Robotham
 }
 \seealso{
-  \code{\link{probotSamplePostMDN}}, \code{\link{probotPredictMDN}},
-  \code{\link{probotScaleForward}}
+  \code{\link{probotSamplePostMDN}}, \code{\link{probotSamplePostNF}},
+  \code{\link{probotPredictMDN}}, \code{\link{probotScaleForward}}
 }
 \examples{
 if (requireNamespace("torch", quietly = TRUE)) {
   set.seed(42)
   torch::torch_manual_seed(42)
 
-  model <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3)()
+  model <- probotMakeMDN(input_dim = 2, output_dim = 2, mdn_components = 3,
+                         hidden_dims = c(16, 16))()
   x <- matrix(rnorm(20), ncol = 2)
-  pred <- probotPredictMDN(x, model, mdn_components = 3)
 
   # True parameter values (10 observations x 2 parameters)
   params <- matrix(rnorm(20), nrow = 10, ncol = 2)
 
   ## CRPS
   crps <- probotCRPS(
-    mdn_output = pred,
+    input = x,
+    model = model,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -158,7 +218,8 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   ## PIT
   pit <- probotPIT(
-    mdn_output = pred,
+    input = x,
+    model = model,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -170,7 +231,8 @@ if (requireNamespace("torch", quietly = TRUE)) {
 
   ## TARP
   tarp <- probotTARP(
-    mdn_output = pred,
+    input = x,
+    model = model,
     params = params,
     n_samples = 100,
     col_means = c(0, 0),
@@ -178,5 +240,21 @@ if (requireNamespace("torch", quietly = TRUE)) {
     verbose = FALSE
   )
   length(tarp)
+
+  # The same three calls work unchanged on a normalising flow.
+  flow <- probotMakeFlow(input_dim = 2, output_dim = 2, n_layers = 2,
+                         hidden_dim = 16, device = "cpu")()
+
+  pit_flow <- probotPIT(
+    input = x,
+    model = flow,
+    params = params,
+    n_samples = 100,
+    col_means = c(0, 0),
+    col_sds = c(1, 1),
+    col_names = c("param1", "param2"),
+    verbose = FALSE
+  )
+  dim(pit_flow)
 }
 }

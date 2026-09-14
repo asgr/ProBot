@@ -11,17 +11,17 @@
 Compute loss values for different network types. \code{probotLossMDN} computes mean negative log-likelihood of targets under a Gaussian mixture. \code{probotLossNF} computes the negative log likelihood loss for training a normalizing flow model. \code{probotLossMSE} computes Mean Squared Error. \code{probotLossMAE} computes Mean Absolute Error. \code{probotLossMAPE} computes Mean Absolute Percentage Error (as a percentage). \code{probotLossHuber} computes the Huber loss.
 }
 \usage{
-probotLossMDN(output_true, output_pred, mdn_components)
+probotLossMDN(output_true, output_pred, model)
 
 probotLossNF(output_true, output_pred, model)
 
-probotLossMSE(output_true, output_pred, mdn_components)
+probotLossMSE(output_true, output_pred, model)
 
-probotLossMAE(output_true, output_pred, mdn_components)
+probotLossMAE(output_true, output_pred, model)
 
-probotLossMAPE(output_true, output_pred, mdn_components)
+probotLossMAPE(output_true, output_pred, model)
 
-probotLossHuber(output_true, output_pred, mdn_components, delta = 1.0)
+probotLossHuber(output_true, output_pred, model, delta = 1.0)
 }
 \arguments{
   \item{output_true}{Torch tensor of true targets with shape
@@ -29,10 +29,12 @@ probotLossHuber(output_true, output_pred, mdn_components, delta = 1.0)
 
   \item{output_pred}{Torch tensor of raw MDN outputs from the network.}
 
-  \item{mdn_components}{Number of Gaussian mixture components used by the model.}
-
-  \item{model}{The normalizing flow model (from \code{\link{probotMakeFlow}})
-  used to compute the forward transformation and Jacobian. For \code{probotLossNF},
+  \item{model}{The model that produced \code{output_pred}. For the MDN family
+  this is the module from \code{\link{probotMakeMDN}}; it is used only to read
+  off the number of mixture components, because the raw output width
+  \code{K * (2D + 1)} does not identify \code{K} and \code{D} on its own. For
+  \code{probotLossNF} it is the flow from \code{\link{probotMakeFlow}}, used to
+  compute the forward transformation and Jacobian. For \code{probotLossNF},
   \code{output_true} is the parameters tensor (\code{batch x D}) and
   \code{output_pred} is the conditioning data (\code{batch x C}).}
 
@@ -42,7 +44,14 @@ probotLossHuber(output_true, output_pred, mdn_components, delta = 1.0)
 The MDN family of loss functions (\code{probotLossMDN}, \code{probotLossMSE},
 \code{probotLossMAE}, \code{probotLossMAPE}, \code{probotLossHuber}) all unpack
 the raw network output into predicted means, scales, and mixture logits using
-an internal helper. For \code{probotLossMDN}, numerically stable log-sum-exp
+an internal helper. The number of components is read from \code{model} rather
+than passed by the caller: an MDN head emits \code{K * (2D + 1)} values, which
+does not identify \code{K} and \code{D} separately (25 units is equally a
+5-component network over 2 parameters and a 1-component network over 12), so
+the tensor alone is ambiguous. \code{probotMakeMDN()} stores both numbers, and
+\code{probotLoad()} reconstructs them, so any model built by this package can
+answer the question. See \code{\link{probotMakeMDN}}.
+For \code{probotLossMDN}, numerically stable log-sum-exp
 aggregation over components yields the mean negative log-likelihood.
 For \code{probotLossMSE}, \code{probotLossMAE}, \code{probotLossMAPE}, and
 \code{probotLossHuber}, the predicted mixture-mean (weighted average of
@@ -72,11 +81,11 @@ if (requireNamespace("torch", quietly = TRUE)) {
   y <- torch::torch_randn(c(4, 1))
 
   pred <- model_mdn(x)
-  loss_mdn <- probotLossMDN(y, pred, mdn_components = 2)
+  loss_mdn <- probotLossMDN(y, pred, model_mdn)
   as.numeric(loss_mdn$item())
 
   ## Flow loss
-  model_nf <- probotMakeFlow(dim_theta = 2, dim_x = 3, n_layers = 2, device = "cpu")()
+  model_nf <- probotMakeFlow(input_dim = 3, output_dim = 2, n_layers = 2, device = "cpu")()
   theta <- torch::torch_randn(c(4, 2), device = "cpu")
   ctx <- torch::torch_randn(c(4, 3), device = "cpu")
 

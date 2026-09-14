@@ -7,15 +7,9 @@ with a Mixture Density Network (MDN) output layer. The network maps input featur
 to a mixture of Gaussian components over the output parameters.
 }
 \usage{
-probotMakeMDN(
-  input_dim,
-  output_dim,
-  mdn_components,
-  hidden_dims = c(128, 256, 256),
-  activation = nnf_relu,
-  dropout = 0,
-  device = NULL
-)
+probotMakeMDN(input_dim, output_dim, mdn_components,
+  hidden_dims = c(128, 256, 256), activation = nnf_relu, dropout = 0,
+  device = NULL)
 }
 \arguments{
     \item{input_dim}{Number of input features.}
@@ -39,6 +33,22 @@ probotMakeMDN(
 The final output layer has \code{mdn_components * (2 * output_dim + 1)} units,
 encoding \code{output_dim} means, \code{output_dim} log10-sigmas, and 1 logit
 per mixture component. The output is unpacked by \code{\link[=probotPredictMDN]{probotPredictMDN()}}.
+
+That width is the only thing the network itself exposes, and it does not
+identify the two factors: a 25-unit head is equally a 5-component network over
+2 parameters and a 1-component network over 12. The constructor therefore
+records \code{mdn_components} and \code{output_dim} on the module, and every
+downstream function that needs the split -- the MDN losses,
+\code{\link{probotPredictMDN}}, \code{\link{probotSamplePostMDN}},
+\code{\link{probotLossEval}} and \code{\link{probotAssess}} -- reads it from
+there rather than taking it as an argument. \code{probotSave()} writes both into
+the checkpoint and \code{\link{probotLoad}} restores them, so a reloaded model
+unpacks exactly as the trained one did.
+
+A hand-built module with neither field stored can still be unpacked when the
+head width has only one valid factorisation (3 units must be K=1, D=1), and is
+rejected with a message listing the candidates when it has more than one. Prefer
+building with \code{probotMakeMDN()}.
 
 When \code{device = NULL}, the network attempts to use MPS (Apple GPU acceleration) if
 available, otherwise falls back to CPU. Pass an explicit device string to override.
