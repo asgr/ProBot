@@ -1,5 +1,5 @@
-\name{probotSigmaPostNF}
-\alias{probotSigmaPostNF}
+\name{probotMarginalPostNF}
+\alias{probotMarginalPostNF}
 \title{Approximate Posterior Mean and SD from a Normalizing Flow}
 \description{
 Fast approximate posterior summaries for a trained normalizing flow, computed
@@ -9,7 +9,7 @@ observation, in the shape of \code{\link{probotMarginalPostMDN}}, at a cost of
 \eqn{2D + 1}{2D + 1} inverse rows per observation instead of \code{n_samples}.
 }
 \usage{
-probotSigmaPostNF(
+probotMarginalPostNF(
   input,
   model,
   col_means = NULL,
@@ -110,7 +110,7 @@ The \code{post_mean} column is exactly what
 \code{probotSamplePostNF(..., point_estimate = TRUE)} returns for a plain flow
 -- the inverse of \code{z = 0} -- and agrees with it to float32 rounding. That
 argument is not the same thing on a \code{\link{probotFlowLoc}} model, where it
-returns the head \eqn{\mu(x)} directly; \code{probotSigmaPostNF} always inverts
+returns the head \eqn{\mu(x)} directly; \code{probotMarginalPostNF} always inverts
 \eqn{z = 0} through the whole model, head included, so on a headed model the
 two differ by the head's offset from the centre.
 }
@@ -137,7 +137,7 @@ model <- probotMakeFlow(input_dim = 5, output_dim = 3, n_layers = 6,
                         hidden_dim = 64, style = "realnvp")()
 # ... train with probotTrainFlow() ...
 
-post <- probotSigmaPostNF(
+post <- probotMarginalPostNF(
   input     = test_inputs,
   model     = model,
   col_means = col_means,

@@ -64,7 +64,7 @@
 
 # Base-space probe grid: row (j - 1) * n + i is displacement[i] on axis j, with
 # every other coordinate zero. Returns an R matrix so the caller can choose the
-# device; probotSigmaPostNF() stacks a +/- pair of these and reads the two
+# device; probotMarginalPostNF() stacks a +/- pair of these and reads the two
 # blocks apart as the columns of d theta / d z.
 .probotSigmaGrid <- function(displacements, output_dim) {
   n <- length(displacements)
@@ -118,7 +118,7 @@
 # sweep returned half-widths of 0.000-0.21 where sampling gave 0.7-1.2. The
 # row-norm formula above is the quantity that actually responds to base-space
 # noise in any direction, which is why this function computes that instead.
-probotSigmaPostNF <- function(input,
+probotMarginalPostNF <- function(input,
                               model,
                               col_means = NULL,
                               col_sds = NULL,
@@ -270,7 +270,7 @@ probotSigmaPostNF <- function(input,
 
       if (verbose && (chunk_i %% progress_every == 0L || chunk_i == n_chunks)) {
         cat(sprintf(
-          "probotSigmaPostNF: chunk %d/%d (obs %d-%d)\n",
+          "probotMarginalPostNF: chunk %d/%d (obs %d-%d)\n",
           chunk_i, n_chunks, start, end
         ))
       }

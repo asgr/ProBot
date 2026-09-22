@@ -127,7 +127,7 @@ Aaron Robotham
 \seealso{
 \code{\link{probotMakeFlow}}, \code{\link{probotLossNF}},
 \code{\link{probotScaleBackward}}, \code{\link{probotSamplePostMDN}},
-\code{\link{probotSigmaPostNF}} for a much cheaper (but first-order) alternative
+\code{\link{probotMarginalPostNF}} for a much cheaper (but first-order) alternative
 }
 \examples{
 \dontrun{
