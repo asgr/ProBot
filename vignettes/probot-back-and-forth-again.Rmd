@@ -161,7 +161,6 @@ forward_fit <- probotTrainMDN(
   dataloader     = forward_loader,
   optimizer      = forward_optimizer,
   epochs         = 100,
-  mdn_components = 5,
   verbose        = TRUE,
   early_stop     = FALSE,
   stop_window    = 5,
@@ -194,8 +193,7 @@ params_test_scaled <- probotScaleForward(
 
 forward_pred <- probotPredictMDN(
   input          = params_test_scaled,
-  model          = forward_fit$model,
-  mdn_components = 5
+  model          = forward_fit$model
 )
 
 forward_summary <- probotMarginalPostMDN(
@@ -251,12 +249,12 @@ representation of what the MDN has learned.
 
 ```{r forward-samples, eval = eval_global}
 fwd_post_samples <- probotSamplePostMDN(
-  mdn_output = forward_pred,
-  index      = 1,
-  n_samples  = 2000,
-  col_means  = attr(stats_scaled, "col_scale")$col_means,
-  col_sds    = attr(stats_scaled, "col_scale")$col_sds,
-  col_names  = colnames(stats_train)
+  input          = params_test_scaled[1, ],
+  model          = forward_fit$model,
+  n_samples      = 2000,
+  col_means      = attr(stats_scaled, "col_scale")$col_means,
+  col_sds        = attr(stats_scaled, "col_scale")$col_sds,
+  col_names      = colnames(stats_train)
 )
 
 head(fwd_post_samples)
@@ -273,11 +271,12 @@ Well-calibrated samples should scatter symmetrically around the truth.
 
 ```{r forward-pit, eval = eval_global}
 PIT_forward <- probotPIT(
-  forward_pred,
-  params    = stats_test,
-  col_means = attr(stats_scaled, "col_scale")$col_means,
-  col_sds   = attr(stats_scaled, "col_scale")$col_sds,
-  col_names = colnames(stats_scaled)
+  input          = params_test_scaled,
+  model          = forward_fit$model,
+  params         = stats_test,
+  col_means      = attr(stats_scaled, "col_scale")$col_means,
+  col_sds        = attr(stats_scaled, "col_scale")$col_sds,
+  col_names      = colnames(stats_scaled)
 )
 ```
 
@@ -294,11 +293,12 @@ a posterior that is too wide.
 
 ```{r forward-tarp, eval = eval_global}
 TARP_forward <- probotTARP(
-  forward_pred,
-  params    = stats_test,
-  col_means = attr(stats_scaled, "col_scale")$col_means,
-  col_sds   = attr(stats_scaled, "col_scale")$col_sds,
-  col_names = colnames(stats_scaled)
+  input          = params_test_scaled,
+  model          = forward_fit$model,
+  params         = stats_test,
+  col_means      = attr(stats_scaled, "col_scale")$col_means,
+  col_sds        = attr(stats_scaled, "col_scale")$col_sds,
+  col_names      = colnames(stats_scaled)
 )
 ```
 
@@ -367,7 +367,6 @@ inverse_fit <- probotTrainMDN(
   dataloader     = inverse_loader,
   optimizer      = inverse_optimizer,
   epochs         = 100,
-  mdn_components = 5,
   verbose        = TRUE,
   early_stop     = FALSE,
   stop_window    = 5,
@@ -401,8 +400,7 @@ stats_test_scaled <- probotScaleForward(
 
 inverse_pred <- probotPredictMDN(
   input          = stats_test_scaled,
-  model          = inverse_fit$model,
-  mdn_components = 5
+  model          = inverse_fit$model
 )
 
 inverse_summary <- probotMarginalPostMDN(
@@ -454,12 +452,12 @@ here.
 
 ```{r inverse-samples, eval = eval_global}
 inv_post_samples <- probotSamplePostMDN(
-  mdn_output = inverse_pred,
-  index      = 1,
-  n_samples  = 2000,
-  col_means  = attr(params_scaled, "col_scale")$col_means,
-  col_sds    = attr(params_scaled, "col_scale")$col_sds,
-  col_names  = colnames(params_train)
+  input          = stats_test_scaled[1, ],
+  model          = inverse_fit$model,
+  n_samples      = 2000,
+  col_means      = attr(params_scaled, "col_scale")$col_means,
+  col_sds        = attr(params_scaled, "col_scale")$col_sds,
+  col_names      = colnames(params_train)
 )
 
 head(inv_post_samples)
@@ -494,11 +492,12 @@ approximately reproduce the prior for those dimensions.
 
 ```{r inverse-pit, eval = eval_global}
 PIT_inverse <- probotPIT(
-  inverse_pred,
-  params    = params_test,
-  col_means = attr(params_scaled, "col_scale")$col_means,
-  col_sds   = attr(params_scaled, "col_scale")$col_sds,
-  col_names = colnames(params_train)
+  input          = stats_test_scaled,
+  model          = inverse_fit$model,
+  params         = params_test,
+  col_means      = attr(params_scaled, "col_scale")$col_means,
+  col_sds        = attr(params_scaled, "col_scale")$col_sds,
+  col_names      = colnames(params_train)
 )
 ```
 
@@ -514,11 +513,12 @@ well calibrated even though those marginals may be very broad.
 
 ```{r inverse-tarp, eval = eval_global}
 TARP_inverse <- probotTARP(
-  inverse_pred,
-  params    = params_test,
-  col_means = attr(params_scaled, "col_scale")$col_means,
-  col_sds   = attr(params_scaled, "col_scale")$col_sds,
-  col_names = colnames(params_train)
+  input          = stats_test_scaled,
+  model          = inverse_fit$model,
+  params         = params_test,
+  col_means      = attr(params_scaled, "col_scale")$col_means,
+  col_sds        = attr(params_scaled, "col_scale")$col_sds,
+  col_names      = colnames(params_train)
 )
 ```
 

@@ -1,8 +1,13 @@
-probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components, 
+probotSingleEpochMDN <- function(model, dataloader, optimizer,
                                  loss_fn = probotLossMDN, lambda = 0) {
+  # loss_fn moved into the slot mdn_components used to occupy, so a legacy
+  # positional count lands here. Catch it as a number rather than as an
+  # "attempt to apply non-function" three frames deeper.
+  .probotCheckLossFn(loss_fn)
+
   model$train()
   running_loss <- 0; running_mae <- 0; running_rmse <- 0
-  running_sigma <- 0; running_mix <- numeric(mdn_components); n_batches <- 0
+  running_sigma <- 0; running_mix <- NULL; n_batches <- 0
   n_elems <- 0
 
   coro::loop(for (batch in dataloader) {
@@ -10,10 +15,14 @@ probotSingleEpochMDN <- function(model, dataloader, optimizer, mdn_components,
     output_pred <- model(batch[[1]])
     
     # 1. Compute primary loss (tensor)
-    current_loss <- loss_fn(batch[[2]], output_pred, mdn_components)
+    current_loss <- loss_fn(batch[[2]], output_pred, model)
     
-    # Unpack for metrics & mixture mean
-    p <- .probotUnpackMDN(output_pred, mdn_components)
+    # Unpack for metrics & mixture mean. The mixture count comes from the model,
+    # so the caller never has to pass it; see .probotMDNK().
+    p <- .probotUnpackMDN(output_pred, model)
+    if (is.null(running_mix)) {
+      running_mix <- numeric(p$mu$size(2))
+    }
     weights <- nnf_softmax(p$logits, dim = 2)
     mu_mix <- (weights$unsqueeze(3) * p$mu)$sum(dim = 2)
     
@@ -67,7 +76,6 @@ probotTrainMDN <- function(model,
                             dataloader,
                             optimizer,
                             epochs = 100,
-                            mdn_components,
                             loss_fn = probotLossMDN,
                             lambda = 0,
                             checkpoint_dir = NULL,
@@ -76,14 +84,29 @@ probotTrainMDN <- function(model,
                             verbose = TRUE,
                             early_stop = TRUE,
                             stop_window = 20,
-                            stop_delta = 1e-2) {
+                            stop_delta = 1e-2,
+                            holdout_fraction = 0.1,
+                            val_dataloader = NULL,
+                            val_batch = NULL,
+                            split_seed = NULL,
+                            holdout_stop = TRUE,
+                            holdout_min_delta = 1e-3,
+                            holdout_patience = 5L) {
+  # Resolve up front so a legacy positional call fails here, not inside the loop.
+  .probotCheckLossFn(loss_fn)
+
+  val <- .probotValSetup(dataloader,
+                         holdout_fraction = holdout_fraction,
+                         val_dataloader = val_dataloader,
+                         val_batch = val_batch,
+                         split_seed = split_seed)
+
   # Wrapper to pass extra args to single epoch
   train_wrapper <- function(m, dl, opt) {
     probotSingleEpochMDN(
       model = m,
       dataloader = dl,
       optimizer = opt,
-      mdn_components = mdn_components,
       loss_fn = loss_fn,
       lambda = lambda
     )
@@ -103,16 +126,14 @@ probotTrainMDN <- function(model,
     early_stop = early_stop,
     stop_window = stop_window,
     stop_delta = stop_delta,
-    checkpoint_prefix = "mdn"
+    checkpoint_prefix = "mdn",
+    val = val,
+    score_fn = if (is.null(val)) NULL else
+      .probotValScorer("mdn", loss_fn, lambda = lambda),
+    holdout_stop = holdout_stop,
+    holdout_min_delta = holdout_min_delta,
+    holdout_patience = holdout_patience
   )
-
-  # Post-process history to match original schema with mix_sd
-  history_df <- res$history
-  if (!is.null(history_df) && "mix" %in% names(history_df)) {
-    # Compute mix_sd from mix column if present
-    # For simplicity, keep original structure by recomputing from stored metrics
-    # Fallback to original schema
-  }
 
   res
 }
